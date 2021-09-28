@@ -1,16 +1,29 @@
-plugins {
-    kotlin("jvm") version "1.5.10"
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+buildscript {
+    var kotlin_version: String by extra
+    kotlin_version = "1.5.31"
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        google()
+    }
+    dependencies {
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
+        // Add the Crashlytics Gradle plugin (be sure to add version
+        // 2.0.0 or later if you built your app with Android Studio 4.1).
+    }
 }
 
-group = "com.lightningkite"
-version = "1.0-SNAPSHOT"
-
-repositories {
-    mavenLocal()
-    mavenCentral()
+allprojects {
+    group = "com.lightningkite.exposedplus"
+    repositories {
+        mavenLocal()
+        google()
+        mavenCentral()
+    }
 }
 
-dependencies {
-    implementation(kotlin("stdlib"))
-    api("org.jetbrains.exposed", "exposed-core", "0.35.1-PLUS")
+tasks.create("clean", Delete::class.java) {
+    delete(rootProject.buildDir)
 }
