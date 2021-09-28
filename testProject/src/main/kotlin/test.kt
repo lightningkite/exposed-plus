@@ -10,8 +10,11 @@ fun main() {
         addLogger(StdOutSqlLogger)
         SchemaUtils.create(Company.table, Employee.table)
         Employee.table.select()
+            .filter { it.name eq "asf" }
             .filter { it.company.value.name eq "Test" }
             .filter { it.company.value.id greaterEq 2 }
             .forEach { println(it) }
+        ContractsFor.table.select()
+            .filter { it.employee.id eq 0 }
     }
 }

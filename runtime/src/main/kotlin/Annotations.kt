@@ -6,8 +6,8 @@ import org.jetbrains.exposed.sql.ReferenceOption
 @Retention(AnnotationRetention.SOURCE)
 @Target(AnnotationTarget.CLASS)
 annotation class TableName(
-    val tableName: String,
-    val databaseName: String = "default"
+    val tableName: String = "",
+    val databaseName: String = ""
 )
 
 @Retention(AnnotationRetention.SOURCE)

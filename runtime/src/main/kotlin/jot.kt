@@ -7,33 +7,38 @@ interface ResultMapper<InstanceType> {
     val convert: (row: ResultRow) -> InstanceType
 }
 
-abstract class ResultMappingTable<ColumnsType, InstanceType, KeyType : Comparable<KeyType>> : Table(),
+interface BaseColumnsType<KeyType> {
+    val set: ColumnSet
+    fun matchingKey(key: KeyType): Op<Boolean>
+    fun matchingKey(otherColumns: List<Column<*>>): Op<Boolean>
+}
+
+abstract class ResultMappingTable<ColumnsType : BaseColumnsType<KeyType>, InstanceType, KeyType>(name: String) : Table(name),
     ResultMapper<InstanceType> {
-    abstract val primaryKeyColumn: Column<KeyType>
-    override val primaryKey: PrimaryKey get() = PrimaryKey(primaryKeyColumn)
     abstract fun alias(name: String): ColumnsType
 }
 
-data class ForeignKeyColumn<TableType : ResultMappingTable<ColumnsType, InstanceType, KeyType>, ColumnsType, InstanceType, KeyType : Comparable<KeyType>>(
-    val key: Column<KeyType>,
+interface ForeignKeyField<TableType, ColumnsType, InstanceType, KeyType> where
+TableType : ResultMappingTable<ColumnsType, InstanceType, KeyType>,
+TableType : BaseColumnsType<KeyType>,
+ColumnsType : BaseColumnsType<KeyType> {
     val mapper: TableType
-)
+    val columns: List<Column<*>>
 
-//fun <
-//        TableType: ResultMappingTable<InstanceType, KeyType>,
-//        InstanceType,
-//        KeyType: Comparable<KeyType>
-//        > Table.reference(name: String, other: TableType): ForeignKeyColumn<TableType, InstanceType, KeyType>
-//    = ForeignKeyColumn(this.registerColumn<KeyType>(name, other.id.columnType).references(other.id), other)
+    @Suppress("UNCHECKED_CAST")
+    val columnsType: ColumnsType
+        get() = mapper as ColumnsType
+}
 
 typealias FK<InstanceType> = ForeignKey<*, *, InstanceType, *>
 
-class ForeignKey<
-        TableType : ResultMappingTable<ColumnsType, InstanceType, KeyType>,
-        ColumnsType,
-        InstanceType,
-        KeyType : Comparable<KeyType>
-        >(val key: KeyType, val source: ForeignKeyColumn<TableType, ColumnsType, InstanceType, KeyType>) {
+class ForeignKey<TableType, ColumnsType, InstanceType, KeyType>(
+    val key: KeyType,
+    val source: ForeignKeyField<TableType, ColumnsType, InstanceType, KeyType>
+) where
+TableType : ResultMappingTable<ColumnsType, InstanceType, KeyType>,
+TableType : BaseColumnsType<KeyType>,
+ColumnsType : BaseColumnsType<KeyType> {
     private var filled: Boolean = false
     private var _value: InstanceType? = null
     val value: InstanceType
@@ -42,7 +47,8 @@ class ForeignKey<
             return if (filled) _value as InstanceType
             else {
                 val calculated =
-                    this.source.mapper.select { source.key eq key }.first().let { source.mapper.convert(it) }
+                    this.source.mapper.select { source.mapper.matchingKey(key) }.first()
+                        .let { source.mapper.convert(it) }
                 _value = calculated
                 calculated
             }
@@ -60,19 +66,28 @@ data class TypedQuery<FieldOwner : ResultMapper<EndType>, EndType>(
     val select: List<Expression<*>>,
     val owner: FieldOwner,
     val condition: Op<Boolean>? = null,
-    val joins: List<ForeignKeyColumn<*, *, *, *>> = listOf(),
+    val joins: List<ExistingJoin> = listOf(),
     val limit: Int? = null,
     val offset: Long? = null,
 ) : Sequence<EndType> {
 
+    data class ExistingJoin(
+        val field: ForeignKeyField<*, *, *, *>,
+        val columnsType: BaseColumnsType<*>
+    )
+
     val query: Query
         get() {
+            var id = 0
+            fun genName(): String = "joined_" + ('a' + id++)
             val query = Query(
                 set = Slice(
                     joins.fold(
                         base
-                    ) { acc: ColumnSet, part: ForeignKeyColumn<*, *, *, *> ->
-                        acc.join(part.mapper, JoinType.LEFT, part.key, part.mapper.primaryKeyColumn)
+                    ) { acc: ColumnSet, part: ExistingJoin ->
+                        acc.join(part.columnsType.set, JoinType.LEFT) {
+                            part.columnsType.matchingKey(part.field.columns)
+                        }
                     },
                     fields = select
                 ),
@@ -85,18 +100,22 @@ data class TypedQuery<FieldOwner : ResultMapper<EndType>, EndType>(
 }
 
 class JoiningSqlExpressionBuilder(
-    val joins: MutableList<ForeignKeyColumn<*, *, *, *>> = mutableListOf()
+    val joins: MutableList<TypedQuery.ExistingJoin> = mutableListOf()
 ) : ISqlExpressionBuilder {
-    val <
+    val <TableType, ColumnsType, InstanceType, KeyType>
+            ForeignKeyField<TableType, ColumnsType, InstanceType, KeyType>.value: ColumnsType
+            where
             TableType : ResultMappingTable<ColumnsType, InstanceType, KeyType>,
-            ColumnsType,
-            InstanceType,
-            KeyType : Comparable<KeyType>
-            > ForeignKeyColumn<TableType, ColumnsType, InstanceType, KeyType>.value: ColumnsType
+            TableType : BaseColumnsType<KeyType>,
+            ColumnsType : BaseColumnsType<KeyType>
         get() {
-            if (this in joins) return this.mapper as ColumnsType
-            joins.add(this)
-            return this.mapper as ColumnsType
+            val existing = joins.find { it.field === this }
+            @Suppress("UNCHECKED_CAST")
+            return existing?.columnsType as? ColumnsType ?: run {
+                val created = this.mapper.alias("joined_" + ('a' + joins.size))
+                joins.add(TypedQuery.ExistingJoin(this, created))
+                return created
+            }
         }
 }
 
@@ -111,21 +130,21 @@ fun <FieldOwner : ResultMapper<EndType>, EndType> TypedQuery<FieldOwner, EndType
     )
 }
 
-fun <
-        FieldOwner : ResultMapper<EndType>,
-        EndType,
-        NewTableType : ResultMappingTable<*, NewInstanceType, NewKeyType>,
-        NewInstanceType,
-        NewKeyType : Comparable<NewKeyType>
-        > TypedQuery<FieldOwner, EndType>.alsoSelect(
-    makeExpr: (FieldOwner) -> ForeignKeyColumn<NewTableType, *, NewInstanceType, NewKeyType>
-): TypedQuery<FieldOwner, EndType> {
-    val other = makeExpr(this.owner)
-    return copy(
-        select = this.select + other.mapper.columns,
-        joins = this.joins + other
-    )
-}
+//fun <
+//        FieldOwner : ResultMapper<EndType>,
+//        EndType,
+//        NewTableType : ResultMappingTable<*, NewInstanceType, NewKeyType>,
+//        NewInstanceType,
+//        NewKeyType : Comparable<NewKeyType>
+//        > TypedQuery<FieldOwner, EndType>.alsoSelect(
+//    makeExpr: (FieldOwner) -> ForeignKeyColumn<NewTableType, *, NewInstanceType, NewKeyType>
+//): TypedQuery<FieldOwner, EndType> {
+//    val other = makeExpr(this.owner)
+//    return copy(
+//        select = this.select + other.mapper.columns,
+//        joins = this.joins + other
+//    )
+//}
 
 //fun <
 //        FieldOwner : ResultMapper<EndType>,
