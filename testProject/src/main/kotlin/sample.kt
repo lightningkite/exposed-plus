@@ -24,9 +24,13 @@ data class Company(
 data class ContractsFor(
     @PrimaryKey val employee: FK<Employee>,
     @PrimaryKey val company: FK<Company>
-) { companion object }
+) {
+    companion object
+}
 
 data class LatLong(
     val latitude: Double,
-    val longitude: Double
-)
+    var longitude: Double
+) {
+    companion object
+}
