@@ -1,11 +1,11 @@
 # Remaining Tasks
 
-- [ ] Multiple Primary Keys
-- [ ] Insert
-- [ ] Update
+- [X] Multiple Primary Keys
+- [X] Embedded Objects
+- [X] Insert
+- [X] Update
 - [ ] Mapping
 - [ ] Select Related
-- [ ] Embedded Objects
 - [ ] Migrations
 - [ ] Autorest
   - [ ] Security definitions

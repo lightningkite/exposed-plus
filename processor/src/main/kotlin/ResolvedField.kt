@@ -1,5 +1,6 @@
 package com.lightningkite.exposedplus
 
+import com.google.devtools.ksp.symbol.KSClassDeclaration
 import java.io.Writer
 
 private fun TabAppendable.access(parts: List<String>) = parts.forEach { append(it); append('.') }
@@ -8,9 +9,23 @@ sealed interface ResolvedField {
     val name: String
     val columns: List<Column>
     fun prependColumnName(name: String): ResolvedField
-    fun writeInterfaceDeclaration(out: TabAppendable)
-    fun writeMainDeclaration(out: TabAppendable, sourceNames: List<String>)
-    fun writeAliasDeclaration(out: TabAppendable, sourceNames: List<String>)
+    fun writePropertyDeclaration(out: TabAppendable)
+    fun writeMainDeclaration(out: TabAppendable, sourceNames: List<String>) {
+        out.append("override ")
+        writePropertyDeclaration(out)
+        out.append(" = ")
+        writeMainValue(out, sourceNames)
+        out.appendLine()
+    }
+    fun writeAliasDeclaration(out: TabAppendable, sourceNames: List<String>) {
+        out.append("override ")
+        writePropertyDeclaration(out)
+        out.append(" = ")
+        writeAliasValue(out, sourceNames)
+        out.appendLine()
+    }
+    fun writeMainValue(out: TabAppendable, sourceNames: List<String>)
+    fun writeAliasValue(out: TabAppendable, sourceNames: List<String>)
     fun writeInstanceConstructionPart(out: TabAppendable, sourceNames: List<String>) {
         out.append(name)
         out.append(" = ")
@@ -29,34 +44,22 @@ sealed interface ResolvedField {
 
         override fun prependColumnName(name: String): ResolvedField = copy(column = column.copy(name = name + "_" + column.name))
 
-        override fun writeInterfaceDeclaration(out: TabAppendable) {
+        override fun writePropertyDeclaration(out: TabAppendable) {
             out.append("val ")
             out.append(name)
             out.append(": ")
             column.writeColumnType(out)
-            out.appendLine()
         }
 
-        override fun writeMainDeclaration(out: TabAppendable, sourceNames: List<String>) {
-            out.append("override val ")
-            out.append(name)
-            out.append(": ")
-            column.writeColumnType(out)
-            out.append(" = ")
+        override fun writeMainValue(out: TabAppendable, sourceNames: List<String>) {
             column.writeColumnDeclaration(out)
-            out.appendLine()
         }
 
-        override fun writeAliasDeclaration(out: TabAppendable, sourceNames: List<String>) {
-            out.append("override val ")
-            out.append(name)
-            out.append(": ")
-            column.writeColumnType(out)
-            out.append(" = alias[")
+        override fun writeAliasValue(out: TabAppendable, sourceNames: List<String>) {
+            out.append("alias[")
             out.access(sourceNames)
             writeColumnAccess(out, column)
             out.append("]")
-            out.appendLine()
         }
 
         override fun writeInstanceConstructionValue(out: TabAppendable, sourceNames: List<String>) {
@@ -80,52 +83,38 @@ sealed interface ResolvedField {
 
         override fun prependColumnName(name: String): ResolvedField = ForeignKey(name, otherTable, childFields = childFields.map { it.prependColumnName(name) })
 
-        override fun writeInterfaceDeclaration(out: TabAppendable) {
+        override fun writePropertyDeclaration(out: TabAppendable) {
             out.append("val ")
             out.append(name)
             out.append(": ")
             out.append(otherTable.simpleName)
             out.append("FKField")
-            out.appendLine()
         }
 
-        override fun writeMainDeclaration(out: TabAppendable, sourceNames: List<String>) {
-//            override val company: CompanyFKField = object : CompanyFKField {
-//                override val id: Column<Long> = long("company_id").references(CompanyTable.id)
-//            }
-            out.append("override val ")
-            out.append(name)
-            out.append(": ")
+        override fun writeMainValue(out: TabAppendable, sourceNames: List<String>) {
             out.append(otherTable.simpleName)
-            out.append("FKField")
-            out.append(" = object : ")
-            out.append(otherTable.simpleName)
-            out.appendLine("FKField { ")
+            out.appendLine("FKField(")
             out.tab {
                 val plusMe = sourceNames + name
                 for (sub in childFields) {
-                    sub.writeMainDeclaration(out, plusMe)
+                    sub.writeMainValue(out, plusMe)
+                    out.appendLine(",")
                 }
             }
-            out.appendLine("}")
+            out.appendLine(")")
         }
 
-        override fun writeAliasDeclaration(out: TabAppendable, sourceNames: List<String>) {
-            out.append("override val ")
-            out.append(name)
-            out.append(": ")
+        override fun writeAliasValue(out: TabAppendable, sourceNames: List<String>) {
             out.append(otherTable.simpleName)
-            out.append("FKField")
-            out.append(" = object : ")
-            out.append(otherTable.simpleName)
-            out.appendLine("FKField { ")
+            out.appendLine("FKField(")
             out.tab {
                 val plusMe = sourceNames + name
                 for (sub in childFields) {
-                    sub.writeAliasDeclaration(out, plusMe)
+                    sub.writeAliasValue(out, plusMe)
+                    out.appendLine(",")
                 }
             }
-            out.appendLine("}")
+            out.appendLine(")")
         }
 
         override fun writeInstanceConstructionValue(out: TabAppendable, sourceNames: List<String>) {
@@ -144,8 +133,7 @@ sealed interface ResolvedField {
                 childFields.single().writeInstanceConstructionValue(out, plusMe)
             }
             out.append(", ")
-            out.access(sourceNames)
-            out.append(name)
+            out.append(otherTable.tableName)
             out.append(")")
         }
 
@@ -179,30 +167,79 @@ sealed interface ResolvedField {
 
     data class Compound(
         override val name: String,
-        override val columns: List<Column>
+        val subTable: CompoundSubTable,
+        val childFields: List<ResolvedField> = subTable.resolved.map { it.prependColumnName(name) }
     ) : ResolvedField {
-        override fun prependColumnName(name: String): ResolvedField {
-            TODO("Not yet implemented")
+        override val columns = childFields.flatMap { it.columns }
+
+        override fun prependColumnName(name: String): ResolvedField = Compound(name, subTable, childFields = childFields.map { it.prependColumnName(name) })
+
+        override fun writePropertyDeclaration(out: TabAppendable) {
+            out.append("val ")
+            out.append(name)
+            out.append(": ")
+            out.append(subTable.simpleName)
+            out.append("SubTable")
         }
 
-        override fun writeInterfaceDeclaration(out: TabAppendable) {
-            TODO("Not yet implemented")
+        override fun writeMainValue(out: TabAppendable, sourceNames: List<String>) {
+            out.append(subTable.simpleName)
+            out.appendLine("SubTable(")
+            out.tab {
+                val plusMe = sourceNames + name
+                for (sub in childFields) {
+                    sub.writeMainValue(out, plusMe)
+                    out.appendLine(",")
+                }
+            }
+            out.appendLine(")")
         }
 
-        override fun writeMainDeclaration(out: TabAppendable, sourceNames: List<String>) {
-            TODO("Not yet implemented")
-        }
-
-        override fun writeAliasDeclaration(out: TabAppendable, sourceNames: List<String>) {
-            TODO("Not yet implemented")
+        override fun writeAliasValue(out: TabAppendable, sourceNames: List<String>) {
+            out.append(subTable.simpleName)
+            out.appendLine("SubTable(")
+            out.tab {
+                val plusMe = sourceNames + name
+                for (sub in childFields) {
+                    sub.writeAliasValue(out, plusMe)
+                    out.appendLine(",")
+                }
+            }
+            out.appendLine(")")
         }
 
         override fun writeInstanceConstructionValue(out: TabAppendable, sourceNames: List<String>) {
-            TODO("Not yet implemented")
+            val plusMe = sourceNames + name
+            out.append(subTable.simpleName)
+            out.append("(")
+            var first = true
+            for(f in childFields) {
+                if(first) first = false else out.append(", ")
+                f.writeInstanceConstructionValue(out, plusMe)
+            }
+            out.append(")")
         }
 
         override fun writeColumnAccess(out: TabAppendable, column: Column) {
-            TODO("Not yet implemented")
+            out.append(name)
+            out.append(".")
+            for(child in childFields) {
+                if(child.columns.contains(column)) {
+                    child.writeColumnAccess(out, column)
+                    return
+                }
+            }
+        }
+
+        override fun writeValueAccess(out: TabAppendable, column: Column) {
+            out.append(name)
+            out.append(".")
+            for(child in childFields) {
+                if(child.columns.contains(column)) {
+                    child.writeColumnAccess(out, column)
+                    return
+                }
+            }
         }
     }
 }

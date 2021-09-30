@@ -1,7 +1,6 @@
 package com.lightningkite.exposedplus
 
 import com.google.devtools.ksp.symbol.KSClassDeclaration
-import java.io.Writer
 
 data class Table(
     val name: String,
@@ -79,26 +78,32 @@ data class Table(
         out.appendLine("interface ${simpleName}Columns : ResultMapper<${simpleName}>, BaseColumnsType<${keyType}> {")
         out.tab {
             for (col in resolved) {
-                col.writeInterfaceDeclaration(out)
+                col.writePropertyDeclaration(out)
+                out.appendLine()
             }
         }
         out.appendLine("}")
         out.appendLine("")
         if (hasCompoundKey) {
             out.append("data class ${simpleName}Key(")
-            first = true
-            for (p in primaryKey) {
-                if (first) first = false else out.append(", ")
-                out.append("val ${p.name}: ${p.kotlinType.toKotlin()}")
+            out.tab {
+                for (p in primaryKey) {
+                    out.append("val ${p.name}: ${p.kotlinType.toKotlin()}")
+                    out.appendLine(",")
+                }
             }
             out.appendLine(")")
             out.appendLine("")
         }
-        out.appendLine("interface ${simpleName}FKField : ForeignKeyField<${simpleName}Table, ${simpleName}Columns, $simpleName, $keyType> {")
+        out.appendLine("data class ${simpleName}FKField(")
         out.tab {
             for (col in primaryKeys) {
-                col.writeInterfaceDeclaration(out)
+                col.writePropertyDeclaration(out)
+                out.appendLine(",")
             }
+        }
+        out.appendLine(") : ForeignKeyField<${simpleName}Table, ${simpleName}Columns, $simpleName, $keyType> {")
+        out.tab {
             out.appendLine("override val mapper: ${simpleName}Table get() = ${simpleName}Table")
             out.append("override val columns: List<Column<*>> get() = listOf(")
             first = true
@@ -117,7 +122,6 @@ data class Table(
             out.appendLine("override val set: ColumnSet get() = this")
             for (col in resolved) {
                 col.writeMainDeclaration(out, listOf())
-//            out.appendLine"    override val ${col.name}: ${col.columnType()} = ${col.makeColumn()}")
             }
             out.append("override val primaryKey: PrimaryKey = PrimaryKey(")
             first = true
@@ -144,6 +148,19 @@ data class Table(
                 out.appendLine(")")
             }
             out.appendLine("}")
+            out.appendLine("")
+            out.appendLine("override fun split(instance: ${simpleName}): Map<Column<*>, Any?> = mapOf(")
+            out.tab {
+                for (f in resolved) {
+                    for (col in f.columns) {
+                        f.writeColumnAccess(out, col)
+                        out.append(" to instance.")
+                        f.writeValueAccess(out, col)
+                        out.appendLine(",")
+                    }
+                }
+            }
+            out.appendLine(")")
             out.appendLine("")
             out.appendLine("@Suppress(\"UNCHECKED_CAST\")")
             out.appendLine("override fun alias(name: String) = MyAlias((this as Table).alias(name) as Alias<${simpleName}Table>)")
@@ -174,6 +191,27 @@ data class Table(
             out.appendLine("")
         }
         out.appendLine("}")
-        out.appendLine("val ${simpleName}.Companion.table: ${simpleName}Table get() = ${simpleName}Table")
+        out.appendLine("inline val ${simpleName}.Companion.table: ${simpleName}Table get() = ${simpleName}Table")
+
+        out.append("inline fun ${simpleName}.Companion.key(key: $keyType) = ")
+        out.append("ForeignKey(key, ")
+        out.append(name)
+        out.appendLine("Table)")
+        out.append("inline val ${simpleName}.key get() = ")
+        out.append("ForeignKey(")
+        if(hasCompoundKey) {
+            out.append(keyType)
+            out.append('(')
+            for (p in primaryKey) {
+                out.append(p.name)
+                out.append(", ")
+            }
+            out.append(')')
+        } else {
+            out.append(primaryKey.single().name)
+        }
+        out.append(", ")
+        out.append(name)
+        out.appendLine("Table)")
     }
 }

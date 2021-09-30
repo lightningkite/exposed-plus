@@ -2,25 +2,14 @@ package com.lightningkite.exposedplus
 
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.*
-import java.io.File
 
 val tables = HashMap<String, Table>()
-
-fun KSPropertyDeclaration.toColumn(): Field {
-    val k = this.type.resolve()
-    return Field(
-        name = this.simpleName.getShortName(),
-        baseType = k.declaration,
-        kotlinType = k,
-        annotations = this.annotations.map { it.resolve() }.toList()
-    )
-}
 
 var runCount = 0
 
 class MyProcessor(val codeGenerator: CodeGenerator, val logger: KSPLogger) : SymbolProcessor {
     override fun process(resolver: Resolver): List<KSAnnotated> {
-        File("/home/jivie/Projects/exposed-plus/test.log").appendText("Starting up...")
+        logger.info("Starting up...")
         if(runCount > 0) {
             return emptyList()
         }
@@ -30,12 +19,7 @@ class MyProcessor(val codeGenerator: CodeGenerator, val logger: KSPLogger) : Sym
             .mapNotNull { it as? KSClassDeclaration }
             .filter { it.annotation("TableName") != null }
             .forEach {
-                val allProps = it.getAllProperties().associateBy { it.simpleName.getShortName() }
-                val columns = it.primaryConstructor!!
-                    .parameters
-                    .filter { it.isVal || it.isVar }
-                    .mapNotNull { allProps[it.name?.getShortName()] }
-                    .map { it.toColumn() }
+                val columns = it.fields()
                 val primaryKeys = columns.filter { it.annotations.byName("PrimaryKey") != null }
                 tables[it.qualifiedName!!.asString()] = Table(
                     name = it.qualifiedName!!.asString(),
@@ -46,12 +30,12 @@ class MyProcessor(val codeGenerator: CodeGenerator, val logger: KSPLogger) : Sym
                     raw = it
                 )
             }
-        File("/home/jivie/Projects/exposed-plus/test.log").appendText("Discovered tables:")
-        tables.forEach { File("/home/jivie/Projects/exposed-plus/test.log").appendText(it.key + ": " + it.value) }
+        logger.info("Discovered tables:")
+        tables.forEach { logger.info(it.key + ": " + it.value) }
         tables
             .values
             .forEach {
-                File("/home/jivie/Projects/exposed-plus/test.log").appendText("Creating table for ${it.simpleName}")
+                logger.info("Creating table for ${it.simpleName}")
                 codeGenerator.createNewFile(
                     dependencies = it.raw.containingFile?.let { Dependencies(false, it) } ?: Dependencies.ALL_FILES,
                     packageName = it.packageName,
@@ -60,7 +44,18 @@ class MyProcessor(val codeGenerator: CodeGenerator, val logger: KSPLogger) : Sym
                     it.writeFile(TabAppendable(out))
                 }
             }
-        File("/home/jivie/Projects/exposed-plus/test.log").appendText("Complete.")
+        subTableCache.values
+            .forEach {
+                logger.info("Creating subtable for ${it.simpleName}")
+                codeGenerator.createNewFile(
+                    dependencies = it.raw.containingFile?.let { Dependencies(false, it) } ?: Dependencies.ALL_FILES,
+                    packageName = it.packageName,
+                    fileName = it.simpleName + "SubTable"
+                ).bufferedWriter().use { out ->
+                    it.writeFile(TabAppendable(out))
+                }
+            }
+        logger.info("Complete.")
         return emptyList()
     }
 }
