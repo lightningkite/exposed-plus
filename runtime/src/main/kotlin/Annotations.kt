@@ -41,3 +41,7 @@ annotation class OnUpdate(val behavior: ReferenceOption)
 @Retention(AnnotationRetention.SOURCE)
 @Target(AnnotationTarget.PROPERTY)
 annotation class AutoIncrement()
+
+@Retention(AnnotationRetention.SOURCE)
+@Target(AnnotationTarget.PROPERTY)
+annotation class ReverseName(val name:String)

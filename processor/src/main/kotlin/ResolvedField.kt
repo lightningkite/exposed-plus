@@ -1,8 +1,5 @@
 package com.lightningkite.exposedplus
 
-import com.google.devtools.ksp.symbol.KSClassDeclaration
-import java.io.Writer
-
 private fun TabAppendable.access(parts: List<String>) = parts.forEach { append(it); append('.') }
 
 sealed interface ResolvedField {
@@ -17,6 +14,7 @@ sealed interface ResolvedField {
         writeMainValue(out, sourceNames)
         out.appendLine()
     }
+
     fun writeAliasDeclaration(out: TabAppendable, sourceNames: List<String>) {
         out.append("override ")
         writePropertyDeclaration(out)
@@ -24,6 +22,7 @@ sealed interface ResolvedField {
         writeAliasValue(out, sourceNames)
         out.appendLine()
     }
+
     fun writeMainValue(out: TabAppendable, sourceNames: List<String>)
     fun writeAliasValue(out: TabAppendable, sourceNames: List<String>)
     fun writeInstanceConstructionPart(out: TabAppendable, sourceNames: List<String>) {
@@ -31,6 +30,7 @@ sealed interface ResolvedField {
         out.append(" = ")
         writeInstanceConstructionValue(out, sourceNames)
     }
+
     fun writeInstanceConstructionValue(out: TabAppendable, sourceNames: List<String>)
     fun writeColumnAccess(out: TabAppendable, column: Column)
     fun writeValueAccess(out: TabAppendable, column: Column) = writeColumnAccess(out, column)
@@ -42,7 +42,8 @@ sealed interface ResolvedField {
         override val columns: List<Column>
             get() = listOf(column)
 
-        override fun prependColumnName(name: String): ResolvedField = copy(column = column.copy(name = name + "_" + column.name))
+        override fun prependColumnName(name: String): ResolvedField =
+            copy(column = column.copy(name = name + "_" + column.name))
 
         override fun writePropertyDeclaration(out: TabAppendable) {
             out.append("val ")
@@ -77,11 +78,17 @@ sealed interface ResolvedField {
     data class ForeignKey(
         override val name: String,
         val otherTable: Table,
-        val childFields: List<ResolvedField> = otherTable.primaryKeys.map { it.prependColumnName(name) }
+        val childFields: List<ResolvedField> = otherTable.resolvedPrimaryKeys.map { it.prependColumnName(name) },
+        val annotations: List<ResolvedAnnotation>,
     ) : ResolvedField {
         override val columns = childFields.flatMap { it.columns }
 
-        override fun prependColumnName(name: String): ResolvedField = ForeignKey(name, otherTable, childFields = childFields.map { it.prependColumnName(name) })
+        override fun prependColumnName(name: String): ResolvedField = ForeignKey(
+            name,
+            otherTable,
+            childFields = childFields.map { it.prependColumnName(name) },
+            annotations = listOf()
+        )
 
         override fun writePropertyDeclaration(out: TabAppendable) {
             out.append("val ")
@@ -122,8 +129,8 @@ sealed interface ResolvedField {
             out.append(otherTable.keyType)
             out.append("(")
             var first = true
-            for(f in childFields) {
-                if(first) first = false else out.append(", ")
+            for (f in childFields) {
+                if (first) first = false else out.append(", ")
                 f.writeInstanceConstructionValue(out, plusMe)
             }
             out.append(")")
@@ -132,8 +139,8 @@ sealed interface ResolvedField {
         override fun writeColumnAccess(out: TabAppendable, column: Column) {
             out.append(name)
             out.append(".")
-            for(child in childFields) {
-                if(child.columns.contains(column)) {
+            for (child in childFields) {
+                if (child.columns.contains(column)) {
                     child.writeColumnAccess(out, column)
                     return
                 }
@@ -143,12 +150,62 @@ sealed interface ResolvedField {
         override fun writeValueAccess(out: TabAppendable, column: Column) {
             out.append(name)
             out.append(".")
-            for(child in childFields) {
-                if(child.columns.contains(column)) {
+            for (child in childFields) {
+                if (child.columns.contains(column)) {
                     child.writeColumnAccess(out, column)
                     return
                 }
             }
+        }
+
+        fun writeReverseAccess(out: TabAppendable, table: Table) {
+            val fieldName =
+                annotations.find { it.type.simpleName.asString() == "ReverseName" }?.arguments?.get("name") as? String
+                    ?: table.simpleName.lowerCaseFirst().makePlural()
+            out.appendLine("val ${otherTable.simpleName}.$fieldName: TypedQuery<${table.simpleName}Table, ${table.simpleName}> ")
+            out.tab {
+                out.appendLine("get() {")
+                out.tab {
+
+                    out.appendLine("return transaction {")
+                    out.tab {
+                        out.appendLine("${table.simpleName}.table.all()")
+                        out.tab {
+                            for (pk in childFields) {
+                                out.appendLine(".filter { it.${name}.${pk.name} eq this@$fieldName.${pk.name} }")
+                            }
+                        }
+                    }
+                    out.appendLine("}")
+                }
+                out.appendLine("}")
+            }
+            out.appendLine()
+        }
+
+        fun writeReverseManyAccess(out: TabAppendable, otherKey: ForeignKey, table:Table) {
+            val fieldName =
+                otherKey.annotations.find { it.type.simpleName.asString() == "ReverseName" }?.arguments?.get("name") as? String
+                    ?: otherKey.otherTable.simpleName.lowerCaseFirst().makePlural()
+            out.appendLine("val ${otherTable.simpleName}.$fieldName: TypedQuery<${otherKey.otherTable.simpleName}Columns, ${otherKey.otherTable.simpleName}> ")
+            out.tab {
+                out.appendLine("get() {")
+                out.tab {
+                    out.appendLine("return transaction {")
+                    out.tab {
+                        out.appendLine("${table.simpleName}.table.all()")
+                        out.tab {
+                            for (pk in childFields) {
+                                out.appendLine(".filter { it.${name}.${pk.name} eq this@$fieldName.${pk.name} }")
+                            }
+                            out.appendLine(".mapFk { it.${otherKey.name} }")
+                        }
+                    }
+                    out.appendLine("}")
+                }
+                out.appendLine("}")
+            }
+            out.appendLine()
         }
 
     }
@@ -160,7 +217,8 @@ sealed interface ResolvedField {
     ) : ResolvedField {
         override val columns = childFields.flatMap { it.columns }
 
-        override fun prependColumnName(name: String): ResolvedField = Compound(name, subTable, childFields = childFields.map { it.prependColumnName(name) })
+        override fun prependColumnName(name: String): ResolvedField =
+            Compound(name, subTable, childFields = childFields.map { it.prependColumnName(name) })
 
         override fun writePropertyDeclaration(out: TabAppendable) {
             out.append("val ")
@@ -201,8 +259,8 @@ sealed interface ResolvedField {
             out.append(subTable.simpleName)
             out.append("(")
             var first = true
-            for(f in childFields) {
-                if(first) first = false else out.append(", ")
+            for (f in childFields) {
+                if (first) first = false else out.append(", ")
                 f.writeInstanceConstructionValue(out, plusMe)
             }
             out.append(")")
@@ -211,8 +269,8 @@ sealed interface ResolvedField {
         override fun writeColumnAccess(out: TabAppendable, column: Column) {
             out.append(name)
             out.append(".")
-            for(child in childFields) {
-                if(child.columns.contains(column)) {
+            for (child in childFields) {
+                if (child.columns.contains(column)) {
                     child.writeColumnAccess(out, column)
                     return
                 }
@@ -222,8 +280,8 @@ sealed interface ResolvedField {
         override fun writeValueAccess(out: TabAppendable, column: Column) {
             out.append(name)
             out.append(".")
-            for(child in childFields) {
-                if(child.columns.contains(column)) {
+            for (child in childFields) {
+                if (child.columns.contains(column)) {
                     child.writeColumnAccess(out, column)
                     return
                 }

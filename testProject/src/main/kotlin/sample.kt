@@ -6,7 +6,7 @@ import org.jetbrains.exposed.sql.*
 data class Employee(
     @PrimaryKey @AutoIncrement val id: Long,
     val name: String,
-    val company: CompanyKey,
+    @ReverseName("herpderps") val company: CompanyKey,
     val location: LatLong
 ) {
     companion object
@@ -23,7 +23,7 @@ data class Company(
 @TableName
 data class ContractsFor(
     @PrimaryKey val employee: EmployeeKey,
-    @PrimaryKey val company: CompanyKey
+    @PrimaryKey @ReverseName("contracts") val company: CompanyKey
 ) { companion object }
 
 data class LatLong(
