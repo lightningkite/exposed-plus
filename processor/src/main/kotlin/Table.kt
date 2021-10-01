@@ -64,7 +64,7 @@ data class Table(
         out.appendLine("import com.lightningkite.exposedplus.*")
         out.appendLine("import org.jetbrains.exposed.sql.*")
         out.appendLine("")
-        out.appendLine("interface ${simpleName}Columns : ResultMapper<${simpleName}>, BaseColumnsType<${keyType}> {")
+        out.appendLine("interface ${simpleName}Columns : BaseColumnsType<${simpleName}, ${keyType}> {")
         out.tab {
             for (col in resolved) {
                 col.writePropertyDeclaration(out)
@@ -113,6 +113,16 @@ data class Table(
             out.append("override val primaryKey: PrimaryKey = PrimaryKey(")
             first = true
             for (pk in primaryKeys) {
+                for (col in pk.columns) {
+                    if (first) first = false else out.append(", ")
+                    pk.writeColumnAccess(out, col)
+                }
+            }
+            out.appendLine(")")
+            out.appendLine("")
+            out.append("override val selections: List<ExpressionWithColumnType<*>> = listOf(")
+            first = true
+            for (pk in resolved) {
                 for (col in pk.columns) {
                     if (first) first = false else out.append(", ")
                     pk.writeColumnAccess(out, col)
@@ -173,6 +183,15 @@ data class Table(
                     field.writeAliasDeclaration(out, listOf("${simpleName}Table"))
                 }
                 writeKeyAccess(out, "")
+                out.append("override val selections: List<ExpressionWithColumnType<*>> = listOf(")
+                first = true
+                for (pk in resolved) {
+                    for (col in pk.columns) {
+                        if (first) first = false else out.append(", ")
+                        pk.writeColumnAccess(out, col)
+                    }
+                }
+                out.appendLine(")")
             }
             out.appendLine("}")
             out.appendLine("")

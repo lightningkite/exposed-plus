@@ -38,10 +38,6 @@ fun main() {
             .forEach { println(it) }
 
         Employee.table.all()
-            .mapSingle { it.id.sum() }
-            .forEach { println("Sum is $it") }
-
-        Employee.table.all()
             .sumBy { it.id }
             .let { println("Sum is $it") }
 
@@ -52,6 +48,14 @@ fun main() {
 
         Employee.table.all()
             .sortedByDescending { it.id }
+            .forEach { println(it) }
+
+        Employee.table.all()
+            .mapFk { it.company }
+            .forEach { println(it) }
+
+        Employee.table.all()
+            .mapCompound { it.location }
             .forEach { println(it) }
 
 //        Employee.table.slice(Employee.table.id.count(), Employee.table.company.id)

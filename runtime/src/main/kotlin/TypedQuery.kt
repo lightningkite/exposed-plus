@@ -19,7 +19,7 @@ data class TypedQuery<FieldOwner : ResultMapper<EndType>, EndType>(
 
     data class ExistingJoin(
         val field: ForeignKeyField<*, *, *, *>,
-        val columnsType: BaseColumnsType<*>
+        val columnsType: BaseColumnsType<*, *>
     )
 
     val query: Query
@@ -44,7 +44,7 @@ data class TypedQuery<FieldOwner : ResultMapper<EndType>, EndType>(
 
     fun asSequence(): Sequence<EndType> = query.asSequence().map(owner.convert)
     fun toList(): List<EndType> = asSequence().toList()
-    inline fun forEach(action: (EndType)->Unit) = asSequence().forEach(action)
+    inline fun forEach(action: (EndType) -> Unit) = asSequence().forEach(action)
 
     fun take(count: Int) = this.copy(limit = count + (limit ?: 0))
     fun drop(count: Long) = this.copy(offset = count + (offset ?: 0))
@@ -66,8 +66,7 @@ class JoiningSqlExpressionBuilder(
             ForeignKeyField<TableType, ColumnsType, InstanceType, KeyType>.value: ColumnsType
             where
             TableType : ResultMappingTable<ColumnsType, InstanceType, KeyType>,
-            TableType : BaseColumnsType<KeyType>,
-            ColumnsType : BaseColumnsType<KeyType>
+            ColumnsType : BaseColumnsType<InstanceType, KeyType>
         get() {
             val existing = joins.find { it.field === this }
             @Suppress("UNCHECKED_CAST")
@@ -90,10 +89,11 @@ fun <FieldOwner : ResultMapper<EndType>, EndType> TypedQuery<FieldOwner, EndType
     )
 }
 
-fun <FieldOwner : SingleResultMapper<EndType>, EndType: Number> TypedQuery<FieldOwner, EndType>.sum(): EndType? {
+fun <FieldOwner : SingleResultMapper<EndType>, EndType : Number> TypedQuery<FieldOwner, EndType>.sum(): EndType? {
     return this.mapSingle { it.value.sum() }.firstOrNull()
 }
-fun <T: Number, FieldOwner : ResultMapper<EndType>, EndType> TypedQuery<FieldOwner, EndType>.sumBy(
+
+fun <T : Number, FieldOwner : ResultMapper<EndType>, EndType> TypedQuery<FieldOwner, EndType>.sumBy(
     makeExpr: JoiningSqlExpressionBuilder.(FieldOwner) -> ExpressionWithColumnType<T>
 ): T? {
     val x = JoiningSqlExpressionBuilder(this.joins.toMutableList())
@@ -125,12 +125,17 @@ fun <FieldOwner : ResultMapper<EndType>, EndType> TypedQuery<FieldOwner, EndType
     )
 }
 
-class SingleResultMapper<T>(val value: ExpressionWithColumnType<T>): ResultMapper<T> {
+class SingleResultMapper<T>(val value: ExpressionWithColumnType<T>) : ResultMapper<T> {
+    override val selections: List<ExpressionWithColumnType<*>>
+        get() = listOf(value)
     override val convert: (row: ResultRow) -> T
         get() = { it[value] }
 }
 
-class PairResultMapper<A, B>(val first: ExpressionWithColumnType<A>, val second: ExpressionWithColumnType<B>): ResultMapper<Pair<A, B>> {
+class PairResultMapper<A, B>(val first: ExpressionWithColumnType<A>, val second: ExpressionWithColumnType<B>) :
+    ResultMapper<Pair<A, B>> {
+    override val selections: List<ExpressionWithColumnType<*>>
+        get() = listOf(first, second)
     override val convert: (row: ResultRow) -> Pair<A, B>
         get() = { it[first] to it[second] }
 }
@@ -146,7 +151,7 @@ fun <T, FieldOwner : ResultMapper<EndType>, EndType> TypedQuery<FieldOwner, EndT
         select = listOf(expr),
         owner = SingleResultMapper(expr),
         condition = this.condition,
-        joins = this.joins,
+        joins = x.joins,
         limit = this.limit,
         offset = this.offset,
         orderBy = this.orderBy
@@ -164,7 +169,113 @@ fun <A, B, FieldOwner : ResultMapper<EndType>, EndType> TypedQuery<FieldOwner, E
         select = listOf(expr.first, expr.second),
         owner = PairResultMapper(expr.first, expr.second),
         condition = this.condition,
-        joins = this.joins,
+        joins = x.joins,
+        limit = this.limit,
+        offset = this.offset,
+        orderBy = this.orderBy
+    )
+}
+
+@JvmName("mapFk")
+fun <
+        FieldOwner,
+        EndType,
+        TableType,
+        ColumnsType,
+        InstanceType,
+        KeyType
+        > TypedQuery<FieldOwner, EndType>.mapFk(
+    makeExpr: JoiningSqlExpressionBuilder.(FieldOwner) -> ForeignKeyField<TableType, ColumnsType, InstanceType, KeyType>
+): TypedQuery<ColumnsType, InstanceType> where
+        FieldOwner : ResultMapper<EndType>,
+        TableType : ResultMappingTable<ColumnsType, InstanceType, KeyType>,
+        ColumnsType : BaseColumnsType<InstanceType, KeyType> {
+    val x = JoiningSqlExpressionBuilder(this.joins.toMutableList())
+    val expr = makeExpr(x, this.owner)
+    val existing = joins.find { it.field === this }
+    @Suppress("UNCHECKED_CAST")
+    val ct = existing?.columnsType as? ColumnsType ?: run {
+        val created = expr.mapper.alias("joined_" + ('a' + joins.size))
+        x.joins.add(TypedQuery.ExistingJoin(expr, created))
+        created
+    }
+    return TypedQuery(
+        base = this.base,
+        select = ct.selections,
+        owner = ct,
+        condition = this.condition,
+        joins = x.joins,
+        limit = this.limit,
+        offset = this.offset,
+        orderBy = this.orderBy
+    )
+}
+
+fun <
+        FieldOwner,
+        EndType,
+        TableType,
+        ColumnsType,
+        InstanceType,
+        KeyType
+        > TypedQuery<FieldOwner, EndType>.prefetch(
+    makeExpr: JoiningSqlExpressionBuilder.(FieldOwner) -> ForeignKeyField<TableType, ColumnsType, InstanceType, KeyType>
+): TypedQuery<ColumnsType, InstanceType> where
+        FieldOwner : ResultMapper<EndType>,
+        TableType : ResultMappingTable<ColumnsType, InstanceType, KeyType>,
+        ColumnsType : BaseColumnsType<InstanceType, KeyType> {
+    val x = JoiningSqlExpressionBuilder(this.joins.toMutableList())
+    val expr = makeExpr(x, this.owner)
+    val existing = joins.find { it.field === this }
+    @Suppress("UNCHECKED_CAST")
+    val ct = existing?.columnsType as? ColumnsType ?: run {
+        val created = expr.mapper.alias("joined_" + ('a' + joins.size))
+        x.joins.add(TypedQuery.ExistingJoin(expr, created))
+        created
+    }
+    val submapper: ResultMapper<EndType> = object : ResultMapper<EndType> {
+        override val convert: (row: ResultRow) -> EndType
+            get() = {
+                val basis = this@prefetch.owner.convert(it)
+                val preResolved = ct.convert(it)
+                TODO("Some dirty magic to insert preResolved into basis, yet to be determined")
+                basis
+            }
+        override val selections: List<ExpressionWithColumnType<*>>
+            get() = this@prefetch.select
+    }
+    return TypedQuery(
+        base = this.base,
+        select = ct.selections,
+        owner = ct,
+        condition = this.condition,
+        joins = x.joins,
+        limit = this.limit,
+        offset = this.offset,
+        orderBy = this.orderBy
+    )
+}
+
+@JvmName("mapCompound")
+fun <
+        FieldOwner,
+        EndType,
+        FieldOwnerB,
+        EndTypeB,
+        > TypedQuery<FieldOwner, EndType>.mapCompound(
+    makeExpr: JoiningSqlExpressionBuilder.(FieldOwner) -> FieldOwnerB
+): TypedQuery<*, *> where
+        FieldOwner : ResultMapper<EndType>,
+        FieldOwnerB : ResultMapper<EndTypeB> {
+    val x = JoiningSqlExpressionBuilder(this.joins.toMutableList())
+    val expr = makeExpr(x, this.owner)
+    val existing = joins.find { it.field === this }
+    return TypedQuery(
+        base = this.base,
+        select = expr.selections,
+        owner = expr,
+        condition = this.condition,
+        joins = x.joins,
         limit = this.limit,
         offset = this.offset,
         orderBy = this.orderBy

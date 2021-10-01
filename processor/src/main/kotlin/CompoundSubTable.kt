@@ -48,6 +48,16 @@ data class CompoundSubTable(
                 out.appendLine(")")
             }
             out.appendLine("}")
+
+            out.append("override val selections: List<ExpressionWithColumnType<*>> = listOf(")
+            var first = true
+            for (pk in resolved) {
+                for (col in pk.columns) {
+                    if (first) first = false else out.append(", ")
+                    pk.writeColumnAccess(out, col)
+                }
+            }
+            out.appendLine(")")
         }
         out.appendLine("}")
     }

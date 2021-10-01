@@ -6,8 +6,7 @@ import org.jetbrains.exposed.sql.select
 
 interface ForeignKeyField<TableType, ColumnsType, InstanceType, KeyType> where
 TableType : ResultMappingTable<ColumnsType, InstanceType, KeyType>,
-TableType : BaseColumnsType<KeyType>,
-ColumnsType : BaseColumnsType<KeyType> {
+ColumnsType : BaseColumnsType<InstanceType, KeyType> {
     val mapper: TableType
     val columns: List<Column<*>>
 
@@ -22,8 +21,7 @@ abstract class ForeignKey<TableType, ColumnsType, InstanceType, KeyType>(
     val table: TableType
 ) where
 TableType : ResultMappingTable<ColumnsType, InstanceType, KeyType>,
-TableType : BaseColumnsType<KeyType>,
-ColumnsType : BaseColumnsType<KeyType> {
+ColumnsType : BaseColumnsType<InstanceType, KeyType> {
     private var filled: Boolean = false
     private var _value: InstanceType? = null
     val value: InstanceType

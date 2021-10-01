@@ -4,7 +4,11 @@
 - [X] Embedded Objects
 - [X] Insert
 - [X] Update
-- [ ] Mapping
+- [X] Mapping
+  - [X] Single
+  - [X] Pair
+  - [X] Foreign Key
+  - [X] Compound
 - [ ] Select Related
 - [ ] Migrations
 - [ ] Autorest
