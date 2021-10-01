@@ -10,6 +10,9 @@
   - [X] Foreign Key
   - [X] Compound
 - [ ] Select Related
+- [ ] Reverses
+  - [ ] Select Related (?)
+  - [ ] Map
 - [ ] Migrations
 - [ ] Autorest
   - [ ] Security definitions
