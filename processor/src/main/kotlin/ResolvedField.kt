@@ -119,21 +119,13 @@ sealed interface ResolvedField {
 
         override fun writeInstanceConstructionValue(out: TabAppendable, sourceNames: List<String>) {
             val plusMe = sourceNames + name
-            out.append("ForeignKey(")
-            if (otherTable.hasCompoundKey) {
-                out.append(otherTable.keyType)
-                out.append("(")
-                var first = true
-                for(f in childFields) {
-                    if(first) first = false else out.append(", ")
-                    f.writeInstanceConstructionValue(out, plusMe)
-                }
-                out.append(")")
-            } else {
-                childFields.single().writeInstanceConstructionValue(out, plusMe)
+            out.append(otherTable.keyType)
+            out.append("(")
+            var first = true
+            for(f in childFields) {
+                if(first) first = false else out.append(", ")
+                f.writeInstanceConstructionValue(out, plusMe)
             }
-            out.append(", ")
-            out.append(otherTable.tableName)
             out.append(")")
         }
 
@@ -151,15 +143,11 @@ sealed interface ResolvedField {
         override fun writeValueAccess(out: TabAppendable, column: Column) {
             out.append(name)
             out.append(".")
-            if(otherTable.hasCompoundKey) {
-                for(child in childFields) {
-                    if(child.columns.contains(column)) {
-                        child.writeColumnAccess(out, column)
-                        return
-                    }
+            for(child in childFields) {
+                if(child.columns.contains(column)) {
+                    child.writeColumnAccess(out, column)
+                    return
                 }
-            } else {
-                out.append("key")
             }
         }
 

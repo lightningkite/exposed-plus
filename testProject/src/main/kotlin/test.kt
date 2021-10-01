@@ -32,5 +32,43 @@ fun main() {
         Employee.table.all()
             .filter { it.company.value.name eq "Test" }
             .forEach { println(it) }
+
+        Employee.table.all()
+            .mapPair { it.id to it.company.id }
+            .forEach { println(it) }
+
+        Employee.table.all()
+            .mapSingle { it.id.sum() }
+            .forEach { println("Sum is $it") }
+
+        Employee.table.all()
+            .sumBy { it.id }
+            .let { println("Sum is $it") }
+
+        Employee.table.all()
+            .mapSingle { it.id }
+            .sum()
+            .let { println("Sum is $it") }
+
+        Employee.table.all()
+            .sortedByDescending { it.id }
+            .forEach { println(it) }
+
+//        Employee.table.slice(Employee.table.id.count(), Employee.table.company.id)
+//            .selectAll()
+//            .groupBy(Employee.table.company.id)
+
+//        Employee.table.selectAll().count()
+//        Employee.table.selectAll().sumOf {  }
+//
+//        Employee.table.all()
+//            .groupingBy { it.company.id }
+//            .eachCount()
+//
+//        CompanyTable.all()
+//            .map { c -> c to Employee.table.all().filter { it.company.id eq c.id } }
+//
+//        CompanyTable.all()
+//            .map { c -> c to Employee.table.all().asSequence().filter { it.company.id == c.id } }
     }
 }

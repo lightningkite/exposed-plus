@@ -14,7 +14,7 @@ data class Table(
     val simpleName: String get() = raw.simpleName.getShortName()
     val tableName: String get() = "${simpleName}Table"
     val hasCompoundKey: Boolean get() = primaryKey.size > 1
-    val keyType: String get() = if (hasCompoundKey) "${simpleName}Key" else primaryKey.single().kotlinType.toKotlin()
+    val keyType: String get() = "${simpleName}Key"
 
     val sqlFullName: String get() = if (schemaName != null) schemaName + sqlName else sqlName
     val resolved by lazy { fields.map { it.resolve() } }
@@ -30,19 +30,8 @@ data class Table(
                 if (first) first = false else out.append(" and ")
                 out.append('(')
                 pk.writeColumnAccess(out, col)
-                if (hasCompoundKey) {
-                    out.append(" eq key.")
-                    pk.writeValueAccess(out, col)
-                } else {
-                    out.append(" eq ")
-                    if (primaryKeys.single() is ResolvedField.Single) {
-                        out.append("key")
-                    } else {
-                        pk.writeValueAccess(out, col)
-                    }
-                }
-                out.append(" as ")
-                col.writeValueType(out)
+                out.append(" eq key.")
+                pk.writeValueAccess(out, col)
                 out.append(')')
             }
         }
@@ -84,17 +73,15 @@ data class Table(
         }
         out.appendLine("}")
         out.appendLine("")
-        if (hasCompoundKey) {
-            out.append("data class ${simpleName}Key(")
-            out.tab {
-                for (p in primaryKey) {
-                    out.append("val ${p.name}: ${p.kotlinType.toKotlin()}")
-                    out.appendLine(",")
-                }
+        out.appendLine("data class ${simpleName}Key(")
+        out.tab {
+            for (p in primaryKey) {
+                out.append("val ${p.name}: ${p.kotlinType.toKotlin()}")
+                out.appendLine(",")
             }
-            out.appendLine(")")
-            out.appendLine("")
         }
+        out.appendLine("): ForeignKey<${simpleName}Table, ${simpleName}Columns, ${simpleName}, ${simpleName}Key>(${simpleName}Table)")
+        out.appendLine("")
         out.appendLine("data class ${simpleName}FKField(")
         out.tab {
             for (col in primaryKeys) {
@@ -193,25 +180,15 @@ data class Table(
         out.appendLine("}")
         out.appendLine("inline val ${simpleName}.Companion.table: ${simpleName}Table get() = ${simpleName}Table")
 
-        out.append("inline fun ${simpleName}.Companion.key(key: $keyType) = ")
-        out.append("ForeignKey(key, ")
-        out.append(name)
-        out.appendLine("Table)")
-        out.append("inline val ${simpleName}.key get() = ")
-        out.append("ForeignKey(")
-        if(hasCompoundKey) {
-            out.append(keyType)
-            out.append('(')
-            for (p in primaryKey) {
-                out.append(p.name)
-                out.append(", ")
+        out.appendLine("inline val ${simpleName}.key get() = $keyType(")
+        out.tab {
+            for (col in primaryKeys) {
+                out.append(col.name)
+                out.append(" = ")
+                out.append(col.name)
+                out.appendLine(",")
             }
-            out.append(')')
-        } else {
-            out.append(primaryKey.single().name)
         }
-        out.append(", ")
-        out.append(name)
-        out.appendLine("Table)")
+        out.appendLine(")")
     }
 }

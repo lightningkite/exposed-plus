@@ -4,67 +4,56 @@ import com.google.devtools.ksp.symbol.*
 
 data class Field(
     val name: String,
-    val baseType: KSDeclaration,
-    val kotlinType: KSType,
+    val kotlinType: KSTypeReference,
     val annotations: List<ResolvedAnnotation>
 ) {
-    fun resolve(): ResolvedField {
-        return when (val qn = kotlinType.declaration.qualifiedName!!.asString()) {
-            "kotlin.Byte",
-            "kotlin.UByte",
-            "kotlin.Short",
-            "kotlin.UShort",
-            "kotlin.Int",
-            "kotlin.UInt",
-            "kotlin.Long",
-            "kotlin.ULong",
-            "kotlin.Float",
-            "kotlin.Double",
-            "java.math.BigDecimal",
-            "kotlin.Char",
-            "kotlin.String",
-            "kotlin.ByteArray",
-            "org.jetbrains.exposed.sql.statements.api.ExposedBlob",
-            "java.util.UUID",
-            "kotlin.Boolean" -> ResolvedField.Single(
+    fun resolve(qn: String = kotlinType.toString().removeSuffix("?"), nullable: Boolean = kotlinType.toString().endsWith("?")): ResolvedField {
+        return Column.ColumnType.fromQn(qn)?.let {
+            ResolvedField.Single(
                 name,
                 Column(
                     name = name,
-                    type = kotlinType,
+                    type = it,
+                    nullable = nullable,
                     annotations = annotations
                 )
             )
-            "com.lightningkite.exposedplus.ForeignKey",
-            "com.lightningkite.exposedplus.FK" -> ResolvedField.ForeignKey(
+        } ?: when(qn) {
+            "com.lightningkite.exposedplus.FK", "FK" -> ResolvedField.ForeignKey(
                 name = name,
-                otherTable = tables[kotlinType.arguments[2].type!!.resolve().declaration.qualifiedName!!.asString()]!!
+                otherTable = tables[kotlinType.element!!.typeArguments[0].type!!.resolve().declaration.qualifiedName!!.asString()]!!
             )
-            else -> when {
-                baseType is KSClassDeclaration -> {
+            else -> {
+                if(qn.endsWith("Key")) {
+                    ResolvedField.ForeignKey(
+                        name = name,
+                        otherTable = tables[qn.substringBefore("Key")]!!
+                    )
+                } else {
+                    //I give up, we need to resolve
+                    val baseType = kotlinType.tryResolve()!!.declaration as KSClassDeclaration
                     if (baseType.classKind == ClassKind.ENUM_CLASS)
                         ResolvedField.Single(
-                        name,
-                        Column(
-                            name = name,
-                            type = kotlinType,
-                            annotations = annotations
+                            name,
+                            Column(
+                                name = name,
+                                type = Column.ColumnType.TypeEnum(baseType),
+                                nullable = nullable,
+                                annotations = annotations
+                            )
                         )
-                    )
                     else if (Modifier.DATA in baseType.modifiers) ResolvedField.Compound(name, baseType.subTable)
                     else throw IllegalArgumentException("Cannot convert ${baseType.qualifiedName?.asString()} to column")
                 }
-                else -> throw IllegalArgumentException("Cannot convert ${baseType.qualifiedName?.asString()} to column")
             }
         }
     }
 }
 
 fun KSPropertyDeclaration.toField(): Field {
-    val k = this.type.resolve()
     return Field(
         name = this.simpleName.getShortName(),
-        baseType = k.declaration,
-        kotlinType = k,
+        kotlinType = this.type,
         annotations = this.annotations.map { it.resolve() }.toList()
     )
 }

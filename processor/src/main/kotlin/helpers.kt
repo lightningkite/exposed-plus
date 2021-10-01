@@ -10,13 +10,10 @@ data class ResolvedAnnotation(
     val arguments: Map<String, Any?>
 )
 
-fun KSTypeArgument.toKotlin(): String {
-    return when(this.variance) {
-        Variance.STAR -> "*"
-        Variance.INVARIANT -> type!!.resolve().toKotlin()
-        Variance.COVARIANT -> "out " + type!!.resolve().toKotlin()
-        Variance.CONTRAVARIANT -> "in " + type!!.resolve().toKotlin()
-    }
+fun KSTypeReference.tryResolve(): KSType? = try {
+    resolve()
+} catch(e:Exception) {
+    null
 }
 
 val KSDeclaration.importSafeName: String get() = when(packageName.asString()) {
@@ -24,17 +21,7 @@ val KSDeclaration.importSafeName: String get() = when(packageName.asString()) {
     else -> this.qualifiedName!!.asString()
 }
 
-fun KSType.toKotlin(): String {
-    return when(val base = this.declaration) {
-        is KSTypeAlias -> {
-            base.type.resolve().declaration.importSafeName + if(this.arguments.isNotEmpty()) this.arguments.joinToString(", ", "<", ">") { it.toKotlin() } else "" + (if(this.isMarkedNullable) "?" else "")
-        }
-        is KSClassDeclaration -> {
-            base.importSafeName + if(this.arguments.isNotEmpty()) this.arguments.joinToString(", ", "<", ">") { it.toKotlin() } else "" + (if(this.isMarkedNullable) "?" else "")
-        }
-        else -> throw IllegalArgumentException()
-    }
-}
+fun KSTypeReference.toKotlin(): String = this.element.toString()
 
 fun List<ResolvedAnnotation>.byName(
     name: String,

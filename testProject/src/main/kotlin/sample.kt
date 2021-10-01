@@ -6,7 +6,7 @@ import org.jetbrains.exposed.sql.*
 data class Employee(
     @PrimaryKey @AutoIncrement val id: Long,
     val name: String,
-    val company: FK<Company>,
+    val company: CompanyKey,
     val location: LatLong
 ) {
     companion object
@@ -22,8 +22,8 @@ data class Company(
 
 @TableName
 data class ContractsFor(
-    @PrimaryKey val employee: FK<Employee>,
-    @PrimaryKey val company: FK<Company>
+    @PrimaryKey val employee: EmployeeKey,
+    @PrimaryKey val company: CompanyKey
 ) { companion object }
 
 data class LatLong(

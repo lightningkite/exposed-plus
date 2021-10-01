@@ -9,6 +9,7 @@ data class CompoundSubTable(
     val raw: KSClassDeclaration,
     val fields: List<Field>,
 ) {
+    var handled = false
     constructor(raw: KSClassDeclaration):this(
         raw = raw,
         fields = raw.fields()

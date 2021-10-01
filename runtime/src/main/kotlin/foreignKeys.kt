@@ -18,8 +18,7 @@ ColumnsType : BaseColumnsType<KeyType> {
 
 typealias FK<InstanceType> = ForeignKey<*, *, InstanceType, *>
 
-class ForeignKey<TableType, ColumnsType, InstanceType, KeyType>(
-    val key: KeyType,
+abstract class ForeignKey<TableType, ColumnsType, InstanceType, KeyType>(
     val table: TableType
 ) where
 TableType : ResultMappingTable<ColumnsType, InstanceType, KeyType>,
@@ -33,7 +32,7 @@ ColumnsType : BaseColumnsType<KeyType> {
             return if (filled) _value as InstanceType
             else {
                 val calculated =
-                    this.table.select { table.matchingKey(key) }.first()
+                    this.table.select { table.matchingKey(this as KeyType) }.first()
                         .let { table.convert(it) }
                 _value = calculated
                 calculated
