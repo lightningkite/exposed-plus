@@ -87,7 +87,7 @@ data class Table(
                 out.appendLine(",")
             }
         }
-        out.appendLine("): ForeignKey<${simpleName}Table, ${simpleName}Columns, ${simpleName}, ${simpleName}Key>(${simpleName}Table)")
+        out.appendLine("): ForeignKey<${simpleName}Table>(${simpleName}Table)")
         out.appendLine("")
         out.appendLine("data class ${simpleName}FKField(")
         out.tab {
@@ -96,7 +96,7 @@ data class Table(
                 out.appendLine(",")
             }
         }
-        out.appendLine(") : ForeignKeyField<${simpleName}Table, ${simpleName}Columns, $simpleName, $keyType> {")
+        out.appendLine(") : ForeignKeyField<${simpleName}Table> {")
         out.tab {
             out.appendLine("override val mapper: ${simpleName}Table get() = ${simpleName}Table")
             out.append("override val columns: List<Column<*>> get() = listOf(")
