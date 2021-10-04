@@ -21,13 +21,15 @@ data class Field(
         } ?: when(qn) {
             "com.lightningkite.exposedplus.FK", "FK" -> ResolvedField.ForeignKey(
                 name = name,
-                otherTable = tables[kotlinType.element!!.typeArguments[0].type!!.resolve().declaration.qualifiedName!!.asString()]!!
+                otherTable = tables[kotlinType.element!!.typeArguments[0].type!!.resolve().declaration.qualifiedName!!.asString()]!!,
+                annotations = annotations,
             )
             else -> {
                 if(qn.endsWith("Key")) {
                     ResolvedField.ForeignKey(
                         name = name,
-                        otherTable = tables[qn.substringBefore("Key")]!!
+                        otherTable = tables[qn.substringBefore("Key")]!!,
+                        annotations = annotations,
                     )
                 } else {
                     //I give up, we need to resolve

@@ -54,3 +54,11 @@ fun KSAnnotated.annotation(name: String, packageName: String = "com.lightningkit
                 it.annotationType.resolve().declaration.qualifiedName?.asString() == "$packageName.$name"
     }
 }
+
+fun String.makePlural() = when{
+    this.last().lowercaseChar() == 's' -> this + "es"
+    this.last().lowercaseChar() == 'y' -> this.substring(0, this.length - 1) + "ies"
+    else -> this + "s"
+}
+
+fun String.lowerCaseFirst() = this.firstOrNull()?.let{ it.lowercase() + if(this.length > 1) this.substring(1) else ""} ?: this
