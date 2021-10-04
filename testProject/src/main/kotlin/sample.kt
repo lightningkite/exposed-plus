@@ -28,5 +28,7 @@ data class ContractsFor(
 
 data class LatLong(
     val latitude: Double,
-    val longitude: Double
-)
+    var longitude: Double
+) {
+    companion object
+}
