@@ -1,5 +1,6 @@
 package com.lightningkite.exposedplus
 
+import com.google.devtools.ksp.getDeclaredProperties
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.*
 

@@ -60,6 +60,9 @@ data class Column(
     fun writeColumnType(out: TabAppendable) {
         out.append("Column<")
         out.append(type.valueName)
+        if(nullable) {
+            out.append("?")
+        }
         out.append(">")
     }
     fun writeBaseColumnDeclaration(out: TabAppendable, name: String = this.name) {
@@ -87,6 +90,9 @@ data class Column(
     }
     fun writeValueType(out: TabAppendable) {
         out.append(type.valueName)
+        if(nullable) {
+            out.append("?")
+        }
     }
     fun writeColumnDeclaration(out: TabAppendable) {
         writeBaseColumnDeclaration(out)

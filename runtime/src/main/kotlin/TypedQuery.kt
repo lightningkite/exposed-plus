@@ -26,7 +26,7 @@ data class TypedQuery<FieldOwner, EndType>(
         get() {
             var id = 0
             fun genName(): String = "joined_" + ('a' + id++)
-            val query = Query(
+            var query = Query(
                 set = Slice(
                     joins.fold(
                         base
@@ -39,6 +39,10 @@ data class TypedQuery<FieldOwner, EndType>(
                 ),
                 where = condition
             ).orderBy(*orderBy.toTypedArray())
+            if(limit != null) {
+                if(offset != null) query = query.limit(limit, offset)
+                else query = query.limit(limit)
+            } else if(offset != null) query = query.limit(Int.MAX_VALUE, offset)
             return query
         }
 
@@ -47,6 +51,7 @@ data class TypedQuery<FieldOwner, EndType>(
     inline fun forEach(action: (EndType) -> Unit) = asSequence().forEach(action)
 
     fun take(count: Int) = this.copy(limit = count + (limit ?: 0))
+    fun drop(count: Int) = drop(count.toLong())
     fun drop(count: Long) = this.copy(offset = count + (offset ?: 0))
 
     fun single() = take(2).asSequence().single()
@@ -95,7 +100,7 @@ fun <FieldOwner : SingleResultMapper<EndType>, EndType : Number> TypedQuery<Fiel
     return this.mapSingle { it.value.sum() }.firstOrNull()
 }
 
-fun <T : Number, FieldOwner, EndType> TypedQuery<FieldOwner, EndType>.sumBy(
+fun <T : Number, FieldOwner, EndType> TypedQuery<FieldOwner, EndType>.sumOf(
     makeExpr: JoiningSqlExpressionBuilder.(FieldOwner) -> ExpressionWithColumnType<T>
 ): T? {
     val x = JoiningSqlExpressionBuilder(this.joins.toMutableList())
@@ -249,10 +254,11 @@ fun <
         override val selections: List<ExpressionWithColumnType<*>>
             get() = this@prefetch.mapper.selections + ct.selections
 
-        override fun getForeignKeyUntyped(key: ForeignKeyField<*>): ((EndType) -> ForeignKey<*>)? {
+        override fun getForeignKeyUntyped(key: ForeignKeyField<*>): ((EndType) -> ForeignKey<*>?)? {
             return ct.getForeignKeyUntyped(key)?.let { child ->
                 {
-                    child((getter(it) as KeyType).value)
+                    @Suppress("UNCHECKED_CAST")
+                    (getter(it) as? KeyType)?.let { child(it.value)}
                 }
             } ?: this@prefetch.mapper.getForeignKeyUntyped(key)
         }

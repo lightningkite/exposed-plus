@@ -7,7 +7,8 @@ data class Field(
     val kotlinType: KSTypeReference,
     val annotations: List<ResolvedAnnotation>
 ) {
-    fun resolve(qn: String = kotlinType.toString().removeSuffix("?"), nullable: Boolean = kotlinType.toString().endsWith("?")): ResolvedField {
+    val nullable: Boolean = kotlinType.isMarkedNullable
+    fun resolve(qn: String = kotlinType.toString().removeSuffix("?"), nullable: Boolean = this.nullable): ResolvedField {
         return Column.ColumnType.fromQn(qn)?.let {
             ResolvedField.Single(
                 name,
@@ -22,13 +23,15 @@ data class Field(
             "com.lightningkite.exposedplus.ForeignKey", "ForeignKey" -> ResolvedField.ForeignKey(
                 name = name,
                 otherTable = tables[kotlinType.element!!.typeArguments[0].type!!.resolve().declaration.qualifiedName!!.asString()]!!,
+                nullable = nullable,
                 annotations = annotations,
             )
             else -> {
-                if(qn.endsWith("Key")) {
+                if(qn.endsWith("Key") || qn.endsWith("Key?")) {
                     ResolvedField.ForeignKey(
                         name = name,
                         otherTable = tables[qn.substringBefore("Key")]!!,
+                        nullable = nullable,
                         annotations = annotations,
                     )
                 } else {

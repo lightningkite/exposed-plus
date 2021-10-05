@@ -13,6 +13,10 @@ fun <Owner : ResultMappingTable<*, T, *>, T> Owner.insert(value: T) = this.inser
     }
 }
 
+fun <Owner, T, Key, RawKey> Owner.insertAndGetKey(value: T): Key where Owner : ResultMappingTable<*, T, Key>, Owner: HasSingleColumnPrimaryKey<RawKey, Key> {
+    return this.keyFromColumnValue(insert(value)[this.primaryKeyColumn])
+}
+
 fun <Owner : ResultMappingTable<*, T, *>, T> Owner.batchInsert(
     values: Iterable<T>,
     ignore: Boolean = false,

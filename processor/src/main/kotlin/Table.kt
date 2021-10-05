@@ -14,7 +14,7 @@ data class Table(
     val packageName: String get() = declaration.packageName.asString()
     val simpleName: String get() = declaration.simpleName.getShortName()
     val tableName: String get() = "${simpleName}Table"
-    val hasCompoundKey: Boolean get() = declaredPrimaryKeys.size > 1
+    val hasSingleKey: Boolean get() = resolvedPrimaryKeys.size == 1 && resolvedPrimaryKeys.single().columns.size == 1
     val keyType: String get() = "${simpleName}Key"
 
     val sqlFullName: String get() = if (schemaName != null) schemaName + sqlName else sqlName
@@ -111,7 +111,38 @@ data class Table(
         }
         out.appendLine("}")
         out.appendLine("")
-        out.appendLine("object ${simpleName}Table : ResultMappingTable<${simpleName}Columns, ${simpleName}, ${keyType}>(\"$sqlFullName\"), ${simpleName}Columns {")
+        out.appendLine("data class ${simpleName}FKFieldNullable(")
+        val nullablePks = resolvedPrimaryKeys.map { it.forceNullable() }
+        out.tab {
+            for (col in nullablePks) {
+                col.writePropertyDeclaration(out)
+                out.appendLine(",")
+            }
+        }
+        out.appendLine(") : ForeignKeyField<${simpleName}Table> {")
+        out.tab {
+            out.appendLine("override val mapper: ${simpleName}Table get() = ${simpleName}Table")
+            out.append("override val columns: List<Column<*>> get() = listOf(")
+            first = true
+            for (pk in nullablePks) {
+                for (col in pk.columns) {
+                    if (first) first = false else out.append(", ")
+                    pk.writeColumnAccess(out, col)
+                }
+            }
+            out.appendLine(")")
+        }
+        out.appendLine("}")
+        out.appendLine("")
+        out.append("object ${simpleName}Table : ResultMappingTable<${simpleName}Columns, ${simpleName}, ${keyType}>(\"$sqlFullName\"), ${simpleName}Columns")
+        if (hasSingleKey) {
+            val p = resolvedPrimaryKeys.first()
+            val k = p.columns.first()
+            out.append(", HasSingleColumnPrimaryKey<")
+            k.writeValueType(out)
+            out.append(", $keyType>")
+        }
+        out.appendLine(" {")
         out.tab {
             out.appendLine("override val set: ColumnSet get() = this")
             for (col in resolvedFields) {
@@ -140,10 +171,10 @@ data class Table(
             writeKeyAccess(out, "")
             out.appendLine("")
             val fks = resolvedFields.mapNotNull { it as? ResolvedField.ForeignKey }
-            if(fks.isNotEmpty()) {
-                out.appendLine("override fun getForeignKeyUntyped(key: ForeignKeyField<*>): (($simpleName) -> ForeignKey<*>)? = when(key) {")
+            if (fks.isNotEmpty()) {
+                out.appendLine("override fun getForeignKeyUntyped(key: ForeignKeyField<*>): (($simpleName) -> ForeignKey<*>?)? = when(key) {")
                 out.tab {
-                    for(fk in fks) {
+                    for (fk in fks) {
                         out.appendLine("${fk.name} -> {{ it.${fk.name} }}")
                     }
                     out.appendLine("else -> null")
@@ -178,6 +209,21 @@ data class Table(
             }
             out.appendLine(")")
             out.appendLine("")
+            if (hasSingleKey) {
+                val p = resolvedPrimaryKeys.first()
+                val k = p.columns.first()
+                out.append("override fun keyFromColumnValue(value: ")
+                k.writeValueType(out)
+                out.appendLine("): ${simpleName}Key = ${simpleName}Key(value)")
+
+                out.append("override val primaryKeyColumn: ")
+                k.writeColumnType(out)
+                out.append(" = ")
+                p.writeColumnAccess(out, k)
+                out.appendLine()
+
+                out.appendLine()
+            }
             out.appendLine("@Suppress(\"UNCHECKED_CAST\")")
             out.appendLine("override fun alias(name: String) = MyAlias((this as Table).alias(name) as Alias<${simpleName}Table>)")
             out.appendLine("class MyAlias(val alias: Alias<${simpleName}Table>) : ${simpleName}Columns {")
@@ -232,27 +278,29 @@ data class Table(
 
 
         // ForeignKeys that are also primary keys.
-        val foreignPrimaries = resolvedForeignKeys.filter{ foreign -> resolvedPrimaryKeys.any{ primary -> foreign.name == primary.name } }
-        if(foreignPrimaries.size > 1){
+        val foreignPrimaries =
+            resolvedForeignKeys.filter { foreign -> resolvedPrimaryKeys.any { primary -> foreign.name == primary.name } }
+        if (foreignPrimaries.size > 1) {
             // This signifies it is a many to many, and the reverse access
             // needs to be different, We need to connect two tables that aren't this one.
-            for (firstKey in foreignPrimaries){
-                for (secondKey in foreignPrimaries){
-                    if(firstKey.name != secondKey.name){
+            for (firstKey in foreignPrimaries) {
+                for (secondKey in foreignPrimaries) {
+                    if (firstKey.name != secondKey.name) {
                         firstKey.writeReverseManyAccess(out, secondKey, this)
                     }
                 }
             }
-        }else{
+        } else {
             // Else this is a regular table, but just uses a foreign key as a primaryKey. It's a thing
-            for (col in foreignPrimaries){
+            for (col in foreignPrimaries) {
                 col.writeReverseAccess(out, this)
             }
         }
 
         // Regular foreign keys
-        val nonPrimaryForeign = resolvedForeignKeys.filter { current -> !foreignPrimaries.any{ other -> current.name == other.name } }
-        for (col in nonPrimaryForeign){
+        val nonPrimaryForeign =
+            resolvedForeignKeys.filter { current -> !foreignPrimaries.any { other -> current.name == other.name } }
+        for (col in nonPrimaryForeign) {
             col.writeReverseAccess(out, this)
         }
     }

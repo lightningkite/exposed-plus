@@ -6,7 +6,7 @@ import kotlin.sequences.Sequence
 interface ResultMapper<InstanceType> {
     val convert: (row: ResultRow) -> InstanceType
     val selections: List<ExpressionWithColumnType<*>>
-    fun getForeignKeyUntyped(key: ForeignKeyField<*>): ((InstanceType)->ForeignKey<*>)? = null
+    fun getForeignKeyUntyped(key: ForeignKeyField<*>): ((InstanceType)->ForeignKey<*>?)? = null
 }
 @Suppress("UNCHECKED_CAST")
 fun <InstanceType, TableType : ResultMappingTable<*, *, *>> ResultMapper<InstanceType>.getForeignKey(key: ForeignKeyField<TableType>): ((InstanceType)->ForeignKey<TableType>)? {
@@ -25,3 +25,7 @@ abstract class ResultMappingTable<ColumnsType : BaseColumnsType<InstanceType, Ke
     abstract fun split(instance: InstanceType): Map<Column<*>, Any?>
 }
 
+interface HasSingleColumnPrimaryKey<RawKey, KeyType> {
+    val primaryKeyColumn: Column<RawKey>
+    abstract fun keyFromColumnValue(value: RawKey): KeyType
+}

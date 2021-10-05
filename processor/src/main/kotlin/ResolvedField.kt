@@ -5,6 +5,8 @@ private fun TabAppendable.access(parts: List<String>) = parts.forEach { append(i
 sealed interface ResolvedField {
     val name: String
     val columns: List<Column>
+    fun forceNullable(): ResolvedField
+    fun replaceAnnotations(newAnnotations: List<ResolvedAnnotation>): ResolvedField
     fun prependColumnName(name: String): ResolvedField
     fun writePropertyDeclaration(out: TabAppendable)
     fun writeMainDeclaration(out: TabAppendable, sourceNames: List<String>) {
@@ -42,6 +44,10 @@ sealed interface ResolvedField {
         override val columns: List<Column>
             get() = listOf(column)
 
+        override fun replaceAnnotations(newAnnotations: List<ResolvedAnnotation>): ResolvedField = copy(column = column.copy(annotations = newAnnotations))
+
+        override fun forceNullable(): ResolvedField = copy(column = column.copy(nullable = true))
+
         override fun prependColumnName(name: String): ResolvedField =
             copy(column = column.copy(name = name + "_" + column.name))
 
@@ -64,10 +70,17 @@ sealed interface ResolvedField {
         }
 
         override fun writeInstanceConstructionValue(out: TabAppendable, sourceNames: List<String>) {
-            out.append("row[")
-            out.access(sourceNames)
-            writeColumnAccess(out, column)
-            out.append("]")
+            if(column.nullable) {
+                out.append("row.getOrNull(")
+                out.access(sourceNames)
+                writeColumnAccess(out, column)
+                out.append(")")
+            } else {
+                out.append("row[")
+                out.access(sourceNames)
+                writeColumnAccess(out, column)
+                out.append("]")
+            }
         }
 
         override fun writeColumnAccess(out: TabAppendable, column: Column) {
@@ -78,14 +91,34 @@ sealed interface ResolvedField {
     data class ForeignKey(
         override val name: String,
         val otherTable: Table,
-        val childFields: List<ResolvedField> = otherTable.resolvedPrimaryKeys.map { it.prependColumnName(name) },
+        val nullable: Boolean,
         val annotations: List<ResolvedAnnotation>,
+        val childFields: List<ResolvedField> = otherTable.resolvedPrimaryKeys.map {
+            if(nullable) it.prependColumnName(name).forceNullable().replaceAnnotations(annotations) else it.prependColumnName(name).replaceAnnotations(annotations)
+        },
     ) : ResolvedField {
         override val columns = childFields.flatMap { it.columns }
+
+        override fun replaceAnnotations(newAnnotations: List<ResolvedAnnotation>): ResolvedField = ForeignKey(
+            name,
+            otherTable,
+            nullable = true,
+            childFields = childFields.map { it.replaceAnnotations(newAnnotations) },
+            annotations = listOf()
+        )
+
+        override fun forceNullable(): ResolvedField = ForeignKey(
+            name,
+            otherTable,
+            nullable = true,
+            childFields = childFields.map { it.forceNullable() },
+            annotations = listOf()
+        )
 
         override fun prependColumnName(name: String): ResolvedField = ForeignKey(
             name,
             otherTable,
+            nullable = nullable,
             childFields = childFields.map { it.prependColumnName(name) },
             annotations = listOf()
         )
@@ -96,11 +129,15 @@ sealed interface ResolvedField {
             out.append(": ")
             out.append(otherTable.simpleName)
             out.append("FKField")
+            if(nullable) out.append("Nullable")
         }
 
         override fun writeMainValue(out: TabAppendable, sourceNames: List<String>) {
+            if(nullable) out.append("/*nullable*/ ")
             out.append(otherTable.simpleName)
-            out.appendLine("FKField(")
+            out.append("FKField")
+            if(nullable) out.append("Nullable")
+            out.appendLine("(")
             out.tab {
                 val plusMe = sourceNames + name
                 for (sub in childFields) {
@@ -113,7 +150,9 @@ sealed interface ResolvedField {
 
         override fun writeAliasValue(out: TabAppendable, sourceNames: List<String>) {
             out.append(otherTable.simpleName)
-            out.appendLine("FKField(")
+            out.append("FKField")
+            if(nullable) out.append("Nullable")
+            out.appendLine("(")
             out.tab {
                 val plusMe = sourceNames + name
                 for (sub in childFields) {
@@ -125,15 +164,36 @@ sealed interface ResolvedField {
         }
 
         override fun writeInstanceConstructionValue(out: TabAppendable, sourceNames: List<String>) {
-            val plusMe = sourceNames + name
-            out.append(otherTable.keyType)
-            out.append("(")
-            var first = true
-            for (f in childFields) {
-                if (first) first = false else out.append(", ")
-                f.writeInstanceConstructionValue(out, plusMe)
+            if (nullable) {
+                val plusMe = sourceNames + name
+                childFields.first().writeInstanceConstructionValue(out, plusMe)
+                out.append("?.let {")
+                out.append(otherTable.keyType)
+                out.append("(")
+                var first = true
+                for (f in childFields) {
+                    if (first) {
+                        first = false
+                        out.append("it")
+                    } else {
+                        out.append(", ")
+                        f.writeInstanceConstructionValue(out, plusMe)
+                        out.append("!!")
+                    }
+                }
+                out.append(")")
+                out.append("}")
+            } else {
+                val plusMe = sourceNames + name
+                out.append(otherTable.keyType)
+                out.append("(")
+                var first = true
+                for (f in childFields) {
+                    if (first) first = false else out.append(", ")
+                    f.writeInstanceConstructionValue(out, plusMe)
+                }
+                out.append(")")
             }
-            out.append(")")
         }
 
         override fun writeColumnAccess(out: TabAppendable, column: Column) {
@@ -149,7 +209,10 @@ sealed interface ResolvedField {
 
         override fun writeValueAccess(out: TabAppendable, column: Column) {
             out.append(name)
-            out.append(".")
+            if (nullable)
+                out.append("?.")
+            else
+                out.append(".")
             for (child in childFields) {
                 if (child.columns.contains(column)) {
                     child.writeColumnAccess(out, column)
@@ -183,7 +246,7 @@ sealed interface ResolvedField {
             out.appendLine()
         }
 
-        fun writeReverseManyAccess(out: TabAppendable, otherKey: ForeignKey, table:Table) {
+        fun writeReverseManyAccess(out: TabAppendable, otherKey: ForeignKey, table: Table) {
             val fieldName =
                 otherKey.annotations.find { it.type.simpleName.asString() == "ReverseName" }?.arguments?.get("name") as? String
                     ?: otherKey.otherTable.simpleName.lowerCaseFirst().makePlural()
@@ -216,6 +279,11 @@ sealed interface ResolvedField {
         val childFields: List<ResolvedField> = subTable.resolved.map { it.prependColumnName(name) }
     ) : ResolvedField {
         override val columns = childFields.flatMap { it.columns }
+
+        override fun replaceAnnotations(newAnnotations: List<ResolvedAnnotation>): ResolvedField
+            = Compound(name, subTable, childFields = childFields.map { it.replaceAnnotations(newAnnotations) })
+
+        override fun forceNullable(): ResolvedField = Compound(name, subTable, childFields = childFields.map { it.forceNullable() })
 
         override fun prependColumnName(name: String): ResolvedField =
             Compound(name, subTable, childFields = childFields.map { it.prependColumnName(name) })
