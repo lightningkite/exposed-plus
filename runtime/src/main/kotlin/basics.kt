@@ -29,3 +29,8 @@ interface HasSingleColumnPrimaryKey<RawKey, KeyType> {
     val primaryKeyColumn: Column<RawKey>
     abstract fun keyFromColumnValue(value: RawKey): KeyType
 }
+
+data class Reverse<Source: BaseColumnsType<*, *>, Destination: ResultMappingTable<*, *, *>>(
+    val foreignKeyOwner: Source,
+    val field: ForeignKeyField<Destination>
+)

@@ -1,9 +1,6 @@
 package com.lightningkite.exposedplus
 
-import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.SchemaUtils
-import org.jetbrains.exposed.sql.StdOutSqlLogger
-import org.jetbrains.exposed.sql.addLogger
+import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.junit.Test
 import kotlin.test.assertEquals
@@ -248,6 +245,23 @@ class TypedQueryTest {
     }
 
     @Test
+    fun test_prefetch_nullable() = transaction {
+        val testData = MyDatabase()
+        val results = Employee.table.all().prefetch { it.manager }.toList()
+        for(r in results)
+            assert(r.manager?.untypedValue == r.manager?.testResolve())
+    }
+
+    @Test
+    fun test_mapReverse() = transaction {
+        val testData = MyDatabase()
+        assertEquals(
+            testData.companies.flatMap { it.directEmployees.toList() },
+            Company.table.all().flatMapReverse { it.directEmployees }.toList().also { println(it) }
+        )
+    }
+
+    @Test
     fun test_mapCompound() = transaction {
         val testData = MyDatabase()
         assertEquals(
@@ -256,3 +270,5 @@ class TypedQueryTest {
         )
     }
 }
+
+val CompanyColumns.directEmployees get() = Reverse(EmployeeTable, EmployeeTable.company)

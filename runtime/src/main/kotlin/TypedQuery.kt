@@ -39,10 +39,10 @@ data class TypedQuery<FieldOwner, EndType>(
                 ),
                 where = condition
             ).orderBy(*orderBy.toTypedArray())
-            if(limit != null) {
-                if(offset != null) query = query.limit(limit, offset)
+            if (limit != null) {
+                if (offset != null) query = query.limit(limit, offset)
                 else query = query.limit(limit)
-            } else if(offset != null) query = query.limit(Int.MAX_VALUE, offset)
+            } else if (offset != null) query = query.limit(Int.MAX_VALUE, offset)
             return query
         }
 
@@ -147,7 +147,6 @@ class PairResultMapper<A, B>(val first: ExpressionWithColumnType<A>, val second:
         get() = { it[first] to it[second] }
 }
 
-@JvmName("mapSingle")
 fun <T, FieldOwner, EndType> TypedQuery<FieldOwner, EndType>.mapSingle(
     makeExpr: JoiningSqlExpressionBuilder.(FieldOwner) -> ExpressionWithColumnType<T>
 ): TypedQuery<SingleResultMapper<T>, T> {
@@ -166,7 +165,6 @@ fun <T, FieldOwner, EndType> TypedQuery<FieldOwner, EndType>.mapSingle(
     )
 }
 
-@JvmName("mapPair")
 fun <A, B, FieldOwner, EndType> TypedQuery<FieldOwner, EndType>.mapPair(
     makeExpr: JoiningSqlExpressionBuilder.(FieldOwner) -> Pair<ExpressionWithColumnType<A>, ExpressionWithColumnType<B>>
 ): TypedQuery<PairResultMapper<A, B>, Pair<A, B>> {
@@ -185,7 +183,6 @@ fun <A, B, FieldOwner, EndType> TypedQuery<FieldOwner, EndType>.mapPair(
     )
 }
 
-@JvmName("mapFk")
 fun <
         FieldOwner,
         EndType,
@@ -199,7 +196,7 @@ fun <
 ): TypedQuery<ColumnsType, InstanceType> {
     val x = JoiningSqlExpressionBuilder(this.joins.toMutableList())
     val expr = makeExpr(x, this.columns)
-    val existing = joins.find { it.field === this }
+    val existing = joins.find { it.field === expr }
 
     @Suppress("UNCHECKED_CAST")
     val ct = existing?.columnsType as? ColumnsType ?: run {
@@ -208,6 +205,38 @@ fun <
         created
     }
     return TypedQuery(
+        base = this.base,
+        columns = ct,
+        mapper = ct,
+        condition = this.condition,
+        joins = x.joins,
+        limit = this.limit,
+        offset = this.offset,
+        orderBy = this.orderBy
+    )
+}
+
+fun <
+        FieldOwner : ResultMappingTable<*, EndType, *>,
+        EndType,
+        DestFieldOwner : ResultMappingTable<DestColumns, DestEndType, *>,
+        DestColumns: BaseColumnsType<DestEndType, *>,
+        DestEndType
+        > TypedQuery<FieldOwner, EndType>.flatMapReverse(
+    makeExpr: JoiningSqlExpressionBuilder.(FieldOwner) -> Reverse<DestFieldOwner, FieldOwner>
+): TypedQuery<DestColumns, DestEndType> {
+    val x = JoiningSqlExpressionBuilder(this.joins.toMutableList())
+    val reverse = makeExpr(x, this.columns)
+    val expr = reverse.field
+    val existing = joins.find { it.field === expr }
+
+    @Suppress("UNCHECKED_CAST")
+    val ct = existing?.columnsType as? DestColumns ?: run {
+        val created = reverse.foreignKeyOwner.alias("joined_" + ('a' + joins.size))
+        x.joins.add(TypedQuery.ExistingJoin(expr, created))
+        created
+    }
+    return TypedQuery<DestColumns, DestEndType>(
         base = this.base,
         columns = ct,
         mapper = ct,
@@ -246,9 +275,13 @@ fun <
         override val convert: (row: ResultRow) -> EndType
             get() = {
                 val basis = this@prefetch.mapper.convert(it)
-                val preResolved = ct.convert.invoke(it)
-                val fk = getter(basis) as KeyType
-                fk.prefill(preResolved)
+
+                @Suppress("UNCHECKED_CAST")
+                val fk = getter(basis) as? KeyType
+                if (fk != null) {
+                    val preResolved = ct.convert(it)
+                    fk.prefill(preResolved)
+                }
                 basis
             }
         override val selections: List<ExpressionWithColumnType<*>>
@@ -258,7 +291,7 @@ fun <
             return ct.getForeignKeyUntyped(key)?.let { child ->
                 {
                     @Suppress("UNCHECKED_CAST")
-                    (getter(it) as? KeyType)?.let { child(it.value)}
+                    (getter(it) as? KeyType)?.let { child(it.value) }
                 }
             } ?: this@prefetch.mapper.getForeignKeyUntyped(key)
         }

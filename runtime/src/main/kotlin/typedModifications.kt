@@ -4,6 +4,7 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.autoIncColumnType
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.statements.ReplaceStatement
 
 fun <Owner : ResultMappingTable<*, T, *>, T> Owner.insert(value: T) = this.insert {
     for(broken in this.split(value)) {
@@ -34,6 +35,13 @@ fun <Owner : ResultMappingTable<*, T, *>, T> Owner.batchInsert(
     }
 )
 
+fun <Owner, T, Key, RawKey> Owner.batchInsertAndGetKeys(
+    values: Iterable<T>,
+    ignore: Boolean = false,
+    shouldReturnGeneratedValues: Boolean = true,
+): List<Key> where Owner : ResultMappingTable<*, T, Key>, Owner: HasSingleColumnPrimaryKey<RawKey, Key>
+        = batchInsert(values, ignore, shouldReturnGeneratedValues).map { keyFromColumnValue(it[this.primaryKeyColumn]) }
+
 fun <Owner : ResultMappingTable<*, T, *>, T> Owner.update(value: T): Int {
     val split = this.split(value)
     return this.update(
@@ -52,4 +60,14 @@ fun <Owner : ResultMappingTable<*, T, *>, T> Owner.update(value: T): Int {
             }
         }
     )
+}
+
+fun <Owner : ResultMappingTable<*, T, *>, T> Owner.upsert(value: T): ReplaceStatement<Long> {
+    val split = this.split(value)
+    return this.replace {
+        for(broken in split) {
+            @Suppress("UNCHECKED_CAST")
+            it[broken.key as Column<Any?>] = broken.value
+        }
+    }
 }
