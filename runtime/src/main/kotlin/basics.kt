@@ -6,6 +6,11 @@ import kotlin.sequences.Sequence
 interface ResultMapper<InstanceType> {
     val convert: (row: ResultRow) -> InstanceType
     val selections: List<ExpressionWithColumnType<*>>
+    fun getForeignKeyUntyped(key: ForeignKeyField<*>): ((InstanceType)->ForeignKey<*>)? = null
+}
+@Suppress("UNCHECKED_CAST")
+fun <InstanceType, TableType : ResultMappingTable<*, *, *>> ResultMapper<InstanceType>.getForeignKey(key: ForeignKeyField<TableType>): ((InstanceType)->ForeignKey<TableType>)? {
+    return getForeignKeyUntyped(key) as? ((InstanceType)->ForeignKey<TableType>)
 }
 
 interface BaseColumnsType<InstanceType, KeyType>: ResultMapper<InstanceType> {

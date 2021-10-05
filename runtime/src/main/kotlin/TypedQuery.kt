@@ -17,7 +17,7 @@ data class TypedQuery<FieldOwner, EndType>(
     val offset: Long? = null,
 ) {
 
-    data class ExistingJoin(
+    class ExistingJoin(
         val field: ForeignKeyField<*>,
         val columnsType: BaseColumnsType<*, *>
     )
@@ -49,10 +49,10 @@ data class TypedQuery<FieldOwner, EndType>(
     fun take(count: Int) = this.copy(limit = count + (limit ?: 0))
     fun drop(count: Long) = this.copy(offset = count + (offset ?: 0))
 
-    fun single() = take(1).asSequence().single()
+    fun single() = take(2).asSequence().single()
     fun first() = take(1).asSequence().first()
     fun last() = asSequence().last()
-    fun singleOrNull() = take(1).asSequence().singleOrNull()
+    fun singleOrNull() = take(2).asSequence().singleOrNull()
     fun firstOrNull() = take(1).asSequence().firstOrNull()
     fun lastOrNull() = asSequence().lastOrNull()
 
@@ -184,8 +184,8 @@ fun <A, B, FieldOwner, EndType> TypedQuery<FieldOwner, EndType>.mapPair(
 fun <
         FieldOwner,
         EndType,
-        TableType: ResultMappingTable<ColumnsType, InstanceType, KeyType>,
-        ColumnsType: BaseColumnsType<InstanceType, KeyType>,
+        TableType : ResultMappingTable<ColumnsType, InstanceType, KeyType>,
+        ColumnsType : BaseColumnsType<InstanceType, KeyType>,
         InstanceType,
         KeyType
         >
@@ -217,35 +217,45 @@ fun <
 fun <
         FieldOwner,
         EndType,
-        TableType: ResultMappingTable<ColumnsType, InstanceType, KeyType>,
-        ColumnsType: BaseColumnsType<InstanceType, KeyType>,
+        TableType : ResultMappingTable<ColumnsType, InstanceType, KeyType>,
+        ColumnsType : BaseColumnsType<InstanceType, KeyType>,
         InstanceType,
-        KeyType
+        KeyType : ForeignKey<TableType>
         >
         TypedQuery<FieldOwner, EndType>.prefetch(
     makeExpr: JoiningSqlExpressionBuilder.(FieldOwner) -> ForeignKeyField<TableType>
 ): TypedQuery<FieldOwner, EndType> {
     val x = JoiningSqlExpressionBuilder(this.joins.toMutableList())
-    val expr = makeExpr(x, this.columns)
-    val existing = joins.find { it.field === this }
+    val expr: ForeignKeyField<TableType> = makeExpr(x, this.columns)
+    val existing = joins.find { it.field === this } ?: run {
+        val created = expr.mapper.alias("joined_" + ('a' + joins.size))
+        val full = TypedQuery.ExistingJoin(expr, created)
+        x.joins.add(full)
+        full
+    }
 
     @Suppress("UNCHECKED_CAST")
-    val ct = existing?.columnsType as? ColumnsType ?: run {
-        val created = expr.mapper.alias("joined_" + ('a' + joins.size))
-        x.joins.add(TypedQuery.ExistingJoin(expr, created))
-        created
-    }
+    val ct = existing.columnsType as ColumnsType
     val submapper: ResultMapper<EndType> = object : ResultMapper<EndType> {
+        val getter = this@prefetch.mapper.getForeignKey(expr)!!
         override val convert: (row: ResultRow) -> EndType
             get() = {
                 val basis = this@prefetch.mapper.convert(it)
-                val preResolved = ct.convert(it)
-//                expr.getter(basis).prefill(preResolved)
-                TODO()
+                val preResolved = ct.convert.invoke(it)
+                val fk = getter(basis) as KeyType
+                fk.prefill(preResolved)
                 basis
             }
         override val selections: List<ExpressionWithColumnType<*>>
             get() = this@prefetch.mapper.selections + ct.selections
+
+        override fun getForeignKeyUntyped(key: ForeignKeyField<*>): ((EndType) -> ForeignKey<*>)? {
+            return ct.getForeignKeyUntyped(key)?.let { child ->
+                {
+                    child((getter(it) as KeyType).value)
+                }
+            } ?: this@prefetch.mapper.getForeignKeyUntyped(key)
+        }
     }
     return TypedQuery(
         base = this.base,

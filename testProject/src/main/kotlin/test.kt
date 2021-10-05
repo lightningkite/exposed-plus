@@ -29,31 +29,46 @@ fun main() {
             location = LatLong(41.0, 40.0)
         ))
 
+        println("---")
         Employee.table.all()
             .filter { it.company.value.name eq "Test" }
             .forEach { println(it) }
 
+        println("---")
         Employee.table.all()
             .mapPair { it.id to it.company.id }
             .forEach { println(it) }
 
+        println("---")
         Employee.table.all()
             .sumBy { it.id }
             .let { println("Sum is $it") }
 
+        println("---")
         Employee.table.all()
             .mapSingle { it.id }
             .sum()
             .let { println("Sum is $it") }
 
+        println("---")
         Employee.table.all()
             .sortedByDescending { it.id }
             .forEach { println(it) }
 
+        println("---")
         Employee.table.all()
             .mapFk { it.company }
             .forEach { println(it) }
 
+        println("---")
+        Employee.table.all()
+            .prefetch { it.company }
+            .forEach {
+                println(it)
+                println("Belongs to ${it.company.value}")
+            }
+
+        println("---")
         Employee.table.all()
             .mapCompound { it.location }
             .forEach { println(it) }

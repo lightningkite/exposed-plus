@@ -139,6 +139,18 @@ data class Table(
             out.appendLine("")
             writeKeyAccess(out, "")
             out.appendLine("")
+            val fks = resolvedFields.mapNotNull { it as? ResolvedField.ForeignKey }
+            if(fks.isNotEmpty()) {
+                out.appendLine("override fun getForeignKeyUntyped(key: ForeignKeyField<*>): (($simpleName) -> ForeignKey<*>)? = when(key) {")
+                out.tab {
+                    for(fk in fks) {
+                        out.appendLine("${fk.name} -> {{ it.${fk.name} }}")
+                    }
+                    out.appendLine("else -> null")
+                }
+                out.appendLine("}")
+                out.appendLine("")
+            }
             out.appendLine("override val convert: (row: ResultRow) -> ${simpleName} = { row ->")
             out.tab {
                 out.appendLine("${simpleName}(")

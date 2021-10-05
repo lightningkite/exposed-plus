@@ -6,19 +6,14 @@ import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.select
 
 
-interface ForeignKeyField<TableType> where TableType : ResultMappingTable<*, *, *> {
-
-//    fun getter(basis: EndType): ForeignKey<TableType, ColumnsType, InstanceType, KeyType>
+interface ForeignKeyField<TableType: ResultMappingTable<*, *, *>> {
     val mapper: TableType
     val columns: List<Column<*>>
 }
 
-typealias FK<TableType> = ForeignKey<TableType>
-
-abstract class ForeignKey<TableType>(
+abstract class ForeignKey<TableType: ResultMappingTable<*, *, *>>(
     val table: TableType
-) where
-TableType : ResultMappingTable<*, *, *>{
+){
     var filled: Boolean = false
     var untypedValue: Any? = null
 }
@@ -37,5 +32,8 @@ val <TableType: ResultMappingTable<*, InstanceType, KeyType>, KeyType: ForeignKe
     }
 
 fun <TableType: ResultMappingTable<*, InstanceType, KeyType>, KeyType: ForeignKey<TableType>, InstanceType> KeyType.prefill(value: InstanceType) {
+    filled = true
     untypedValue = value
 }
+
+typealias FK<TableType> = ForeignKey<TableType>

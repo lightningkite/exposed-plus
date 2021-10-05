@@ -9,7 +9,7 @@
   - [X] Pair
   - [X] Foreign Key
   - [X] Compound
-- [ ] Select Related
+- [X] Select Related
 - [ ] Reverses
   - [ ] Select Related (?)
   - [ ] Map
