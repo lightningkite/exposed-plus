@@ -1,5 +1,6 @@
 rootProject.name = "exposed-plus"
 
-include(":runtime")
+include(":shared-runtime")
+include(":server-runtime")
+//include(":client-runtime")
 include(":processor")
-include(":testProject")

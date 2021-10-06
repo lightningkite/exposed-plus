@@ -7,6 +7,7 @@ import kotlin.test.assertEquals
 
 class TypedQueryTest {
     val db = Database.connect("jdbc:h2:mem:test", driver = "org.h2.Driver")
+
     class MyDatabase {
         init {
             SchemaUtils.create(Company.table, Employee.table, ContractsFor.table, PrimitiveTestModel.table)
@@ -15,42 +16,51 @@ class TypedQueryTest {
         val companyLK: Company = Company.table.insertAndGetKey(Company(id = -1L, name = "Lightning Kite")).value
         val companyE3: Company = Company.table.insertAndGetKey(Company(id = -1L, name = "Emergent Three")).value
         val dan: Employee = Employee.table.insertAndGetKey(
-                Employee(
-                    id = -1L,
-                    name = "Dan",
-                    company = companyLK.key,
-                    manager = null,
-                    location = LatLong(40.0, 40.0)
-                )
-            ).value
+            Employee(
+                id = -1L,
+                name = "Dan",
+                company = companyLK.key,
+                manager = null,
+                location = LatLong(40.0, 40.0)
+            )
+        ).value
         val lorenzo: Employee = Employee.table.insertAndGetKey(
-                Employee(
-                    id = -1L,
-                    name = "Lorenzo",
-                    company = companyLK.key,
-                    manager = Employee.table.all().filter { it.name eq "Dan" }.single().key,
-                    location = LatLong(40.0, 40.0)
-                )
-            ).value
+            Employee(
+                id = -1L,
+                name = "Lorenzo",
+                company = companyLK.key,
+                manager = Employee.table.all().filter { it.name eq "Dan" }.single().key,
+                location = LatLong(40.0, 40.0)
+            )
+        ).value
         val joseph: Employee = Employee.table.insertAndGetKey(
-                Employee(
-                    id = -1L,
-                    name = "Joseph",
-                    company = companyLK.key,
-                    manager = Employee.table.all().filter { it.name eq "Lorenzo" }.single().key,
-                    location = LatLong(40.0, 40.0)
-                )
-            ).value
+            Employee(
+                id = -1L,
+                name = "Joseph",
+                company = companyLK.key,
+                manager = Employee.table.all().filter { it.name eq "Lorenzo" }.single().key,
+                location = LatLong(40.0, 40.0)
+            )
+        ).value
+        val joseph2: Employee = Employee.table.insertAndGetKey(
+            Employee(
+                id = -1L,
+                name = "Joseph Two",
+                company = companyLK.key,
+                manager = Employee.table.all().filter { it.name eq "Dan" }.single().key,
+                location = LatLong(40.0, 40.0)
+            )
+        ).value
         val preston: Employee = Employee.table.insertAndGetKey(
-                Employee(
-                    id = -1L,
-                    name = "Preston",
-                    company = companyE3.key,
-                    manager = null,
-                    location = LatLong(41.0, 40.0)
-                )
-            ).value
-        val employees = listOf(dan, lorenzo, joseph, preston)
+            Employee(
+                id = -1L,
+                name = "Preston",
+                company = companyE3.key,
+                manager = null,
+                location = LatLong(41.0, 40.0)
+            )
+        ).value
+        val employees = listOf(dan, lorenzo, joseph, joseph2, preston)
         val companies = listOf(companyLK, companyE3)
     }
 
@@ -104,7 +114,7 @@ class TypedQueryTest {
         var thrown = false
         try {
             Employee.table.all().single()
-        } catch(e: Exception) {
+        } catch (e: Exception) {
             thrown = true
         }
         assert(thrown)
@@ -170,6 +180,67 @@ class TypedQueryTest {
         assertEquals(
             testData.employees.filter { it.id > 2 },
             Employee.table.all().filter { it.id greater 2 }.toList()
+        )
+    }
+
+    @Test
+    fun test_filter_fk() = transaction {
+        val testData = MyDatabase()
+        assertEquals(
+            testData.employees.filter { it.company.value.name == "Lightning Kite" },
+            Employee.table.all().filter { it.company.value.name eq "Lightning Kite" }.toList()
+        )
+    }
+
+    @Test
+    fun test_filter_reverse() = transaction {
+        val testData = MyDatabase()
+        assertEquals(
+            testData.companies.filter { it.directEmployees.toList().any { it.name.startsWith("Joseph") } },
+            Company.table.all().filter { it.directEmployees.any { it.name.startsWith("Joseph") }}.toList()
+        )
+    }
+
+    @Test fun test_any() = transaction {
+        val testData = MyDatabase()
+        assertEquals(
+            testData.employees.any { it.name == "Joseph" },
+            Employee.table.all().any { it.name eq "Joseph" }
+        )
+    }
+    @Test fun test_none() = transaction {
+        val testData = MyDatabase()
+        assertEquals(
+            testData.employees.none { it.name == "Joseph" },
+            Employee.table.all().none { it.name eq "Joseph" }
+        )
+    }
+    @Test fun test_all() = transaction {
+        val testData = MyDatabase()
+        assertEquals(
+            testData.employees.all { it.name == "Joseph" },
+            Employee.table.all().all { it.name eq "Joseph" }
+        )
+    }
+    @Test fun test_minByOrNull() = transaction {
+        val testData = MyDatabase()
+        assertEquals(
+            testData.employees.minByOrNull { it.name },
+            Employee.table.all().minByOrNull { it.name }
+        )
+    }
+    @Test fun test_maxByOrNull() = transaction {
+        val testData = MyDatabase()
+        assertEquals(
+            testData.employees.maxByOrNull { it.name },
+            Employee.table.all().maxByOrNull { it.name }
+        )
+    }
+    @Test fun test_field_count() = transaction {
+        val testData = MyDatabase()
+        assertEquals(
+            testData.companies.map { it.directEmployees.count() },
+            Company.table.all().mapSingle { it.directEmployees.count() }.toList()
         )
     }
 
@@ -240,21 +311,22 @@ class TypedQueryTest {
     fun test_prefetch() = transaction {
         val testData = MyDatabase()
         val results = Employee.table.all().prefetch { it.company }.toList()
-        for(r in results)
-            assert(r.company.untypedValue != null)
+        for (r in results)
+            assert(r.company.cachedValue != null)
     }
 
     @Test
     fun test_prefetch_nullable() = transaction {
         val testData = MyDatabase()
         val results = Employee.table.all().prefetch { it.manager }.toList()
-        for(r in results)
-            assert(r.manager?.untypedValue == r.manager?.testResolve())
+        for (r in results)
+            assert(r.manager?.cachedValue == r.manager?.testResolve())
     }
 
     @Test
-    fun test_mapReverse() = transaction {
+    fun test_flatMapReverse() = transaction {
         val testData = MyDatabase()
+        addLogger(StdOutSqlLogger)
         assertEquals(
             testData.companies.flatMap { it.directEmployees.toList() },
             Company.table.all().flatMapReverse { it.directEmployees }.toList().also { println(it) }
@@ -270,5 +342,3 @@ class TypedQueryTest {
         )
     }
 }
-
-val CompanyColumns.directEmployees get() = Reverse(EmployeeTable, EmployeeTable.company)

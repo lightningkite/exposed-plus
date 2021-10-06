@@ -9,9 +9,6 @@ version = "1.0-SNAPSHOT"
 dependencies {
     implementation(kotlin("stdlib"))
     kspTest(project(":processor"))
-    api("org.jetbrains.exposed", "exposed-core", "0.35.1")
-    api("org.jetbrains.exposed", "exposed-jdbc", "0.35.1")
-    testImplementation("com.h2database:h2:1.4.197")
     testImplementation(kotlin("test"))
 }
 
@@ -24,6 +21,11 @@ publishing {
             from(components["kotlin"])
         }
     }
+}
+
+ksp {
+    arg("generateKeys", "true")
+    arg("generateExposed", "false")
 }
 
 kotlin {

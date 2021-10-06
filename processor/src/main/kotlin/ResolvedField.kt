@@ -225,7 +225,7 @@ sealed interface ResolvedField {
             val fieldName =
                 annotations.find { it.type.simpleName.asString() == "ReverseName" }?.arguments?.get("name") as? String
                     ?: table.simpleName.lowerCaseFirst().makePlural()
-            out.appendLine("val ${otherTable.simpleName}.$fieldName: TypedQuery<${table.simpleName}Table, ${table.simpleName}> ")
+            out.appendLine("val ${otherTable.simpleName}.$fieldName: TypedQuery<${table.simpleName}Columns, ${table.simpleName}> ")
             out.tab {
                 out.appendLine("get() {")
                 out.tab {
@@ -243,6 +243,13 @@ sealed interface ResolvedField {
                 }
                 out.appendLine("}")
             }
+            out.appendLine()
+
+            out.append("val ")
+            out.append(otherTable.simpleName)
+            out.append("Columns.")
+            out.append(fieldName)
+            out.append(" get() = Reverse(this, ${table.simpleName}Table) { it.${name} }")
             out.appendLine()
         }
 

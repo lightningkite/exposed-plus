@@ -9,12 +9,13 @@ interface ResultMapper<InstanceType> {
     fun getForeignKeyUntyped(key: ForeignKeyField<*>): ((InstanceType)->ForeignKey<*>?)? = null
 }
 @Suppress("UNCHECKED_CAST")
-fun <InstanceType, TableType : ResultMappingTable<*, *, *>> ResultMapper<InstanceType>.getForeignKey(key: ForeignKeyField<TableType>): ((InstanceType)->ForeignKey<TableType>)? {
-    return getForeignKeyUntyped(key) as? ((InstanceType)->ForeignKey<TableType>)
+fun <InstanceType, TableType : ResultMappingTable<*, PointedType, *>, PointedType> ResultMapper<InstanceType>.getForeignKey(key: ForeignKeyField<TableType>): ((InstanceType)->ForeignKey<PointedType>)? {
+    return getForeignKeyUntyped(key) as? ((InstanceType)->ForeignKey<PointedType>)
 }
 
 interface BaseColumnsType<InstanceType, KeyType>: ResultMapper<InstanceType> {
     val set: ColumnSet
+    val primaryKeyColumns: List<Column<*>>
     fun matchingKey(key: KeyType): Op<Boolean>
     fun matchingKey(otherColumns: List<Column<*>>): Op<Boolean>
 }
@@ -29,8 +30,3 @@ interface HasSingleColumnPrimaryKey<RawKey, KeyType> {
     val primaryKeyColumn: Column<RawKey>
     abstract fun keyFromColumnValue(value: RawKey): KeyType
 }
-
-data class Reverse<Source: BaseColumnsType<*, *>, Destination: ResultMappingTable<*, *, *>>(
-    val foreignKeyOwner: Source,
-    val field: ForeignKeyField<Destination>
-)

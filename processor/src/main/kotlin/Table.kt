@@ -63,7 +63,25 @@ data class Table(
         out.appendLine("${tabChars}}")
     }
 
-    fun writeFile(out: TabAppendable) {
+    fun writeKeyFile(out: TabAppendable) {
+        out.appendLine("package ${packageName}")
+        out.appendLine("")
+        out.appendLine("data class ${simpleName}Key(")
+        out.tab {
+            for (p in declaredPrimaryKeys) {
+                out.append("val ${p.name}: ${p.kotlinType.toKotlin()}")
+                out.appendLine(",")
+            }
+        }
+        out.appendLine("): ForeignKey<${simpleName}>() {")
+        out.tab {
+            out.appendLine("object Handle: KeyHandle<$simpleName>")
+            out.appendLine("override val handle = Handle")
+        }
+        out.appendLine("}")
+    }
+
+    fun writeExposedFile(out: TabAppendable) {
         var first = false
         out.appendLine("package ${packageName}")
         out.appendLine("")
@@ -79,15 +97,6 @@ data class Table(
             }
         }
         out.appendLine("}")
-        out.appendLine("")
-        out.appendLine("data class ${simpleName}Key(")
-        out.tab {
-            for (p in declaredPrimaryKeys) {
-                out.append("val ${p.name}: ${p.kotlinType.toKotlin()}")
-                out.appendLine(",")
-            }
-        }
-        out.appendLine("): ForeignKey<${simpleName}Table>(${simpleName}Table)")
         out.appendLine("")
         out.appendLine("data class ${simpleName}FKField(")
         out.tab {
@@ -144,10 +153,20 @@ data class Table(
         }
         out.appendLine(" {")
         out.tab {
+            out.appendLine("init { register(${simpleName}Key.Handle) }")
             out.appendLine("override val set: ColumnSet get() = this")
             for (col in resolvedFields) {
                 col.writeMainDeclaration(out, listOf())
             }
+            out.append("override val primaryKeyColumns: List<Column<*>> get() = listOf(")
+            first = true
+            for (pk in resolvedPrimaryKeys) {
+                for (col in pk.columns) {
+                    if (first) first = false else out.append(", ")
+                    pk.writeColumnAccess(out, col)
+                }
+            }
+            out.appendLine(")")
             out.append("override val primaryKey: PrimaryKey = PrimaryKey(")
             first = true
             for (pk in resolvedPrimaryKeys) {
@@ -157,7 +176,7 @@ data class Table(
                 }
             }
             out.appendLine(")")
-            out.appendLine("")
+            out.appendLine()
             out.append("override val selections: List<ExpressionWithColumnType<*>> = listOf(")
             first = true
             for (pk in resolvedFields) {
@@ -257,6 +276,15 @@ data class Table(
                     }
                 }
                 out.appendLine(")")
+                out.append("override val primaryKeyColumns: List<Column<*>> get() = listOf(")
+                first = true
+                for (pk in resolvedPrimaryKeys) {
+                    for (col in pk.columns) {
+                        if (first) first = false else out.append(", ")
+                        pk.writeColumnAccess(out, col)
+                    }
+                }
+                out.append(")")
             }
             out.appendLine("}")
             out.appendLine("")
