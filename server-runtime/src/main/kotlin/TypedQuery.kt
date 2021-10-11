@@ -75,6 +75,8 @@ data class TypedQuery<FieldOwner, EndType>(
     fun firstOrNull() = take(1).asSequence().firstOrNull()
     fun lastOrNull() = asSequence().lastOrNull()
 
+    fun reversed() = copy(orderBy = orderBy.map { it.first to it.second.reversed })
+
     fun count() = query.count()
     fun any(): Boolean = firstOrNull() != null
     fun none(): Boolean = firstOrNull() == null
@@ -258,19 +260,36 @@ inline fun <FieldOwner, EndType> TypedQuery<FieldOwner, EndType>.sortedByDescend
     )
 }
 
+inline fun <FieldOwner, EndType> TypedQuery<FieldOwner, EndType>.skipColumns(
+    makeExpr: (FieldOwner) -> Map<Column<*>, *>
+): TypedQuery<FieldOwner, EndType> {
+    val defaults = makeExpr(this.columns)
+    return TypedQuery(
+        base = base,
+        columns = columns,
+        mapper = object: ResultMapper<EndType> {
+            override val convert: (row: ResultRow) -> EndType = { row ->
+                for(default in defaults) {
+                    row[default.key] = default.value
+                }
+                this@skipColumns.mapper.convert(row)
+            }
+            override val selections: List<ExpressionWithColumnType<*>> = this@skipColumns.mapper.selections - defaults.keys
+        },
+        condition = condition,
+        orderBy = orderBy,
+        joins = joins,
+        needsGroupBy = needsGroupBy,
+        limit = limit,
+        offset = offset
+    )
+}
+
 class SingleResultMapper<T>(val value: ExpressionWithColumnType<T>) : ResultMapper<T> {
     override val selections: List<ExpressionWithColumnType<*>>
         get() = listOf(value)
     override val convert: (row: ResultRow) -> T
         get() = { it[value] }
-}
-
-class PairResultMapper<A, B>(val first: ExpressionWithColumnType<A>, val second: ExpressionWithColumnType<B>) :
-    ResultMapper<Pair<A, B>> {
-    override val selections: List<ExpressionWithColumnType<*>>
-        get() = listOf(first, second)
-    override val convert: (row: ResultRow) -> Pair<A, B>
-        get() = { it[first] to it[second] }
 }
 
 inline fun <T, FieldOwner, EndType> TypedQuery<FieldOwner, EndType>.mapSingle(
@@ -283,6 +302,14 @@ inline fun <T, FieldOwner, EndType> TypedQuery<FieldOwner, EndType>.mapSingle(
         columns = m,
         mapper = m,
     )
+}
+
+class PairResultMapper<A, B>(val first: ExpressionWithColumnType<A>, val second: ExpressionWithColumnType<B>) :
+    ResultMapper<Pair<A, B>> {
+    override val selections: List<ExpressionWithColumnType<*>>
+        get() = listOf(first, second)
+    override val convert: (row: ResultRow) -> Pair<A, B>
+        get() = { it[first] to it[second] }
 }
 
 inline fun <A, B, FieldOwner, EndType> TypedQuery<FieldOwner, EndType>.mapPair(

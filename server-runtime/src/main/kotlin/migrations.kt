@@ -9,9 +9,9 @@ class VirtualSchema {
 }
 
 sealed interface SchemaBuildingStatement {
-    val statements: List<String>
     fun reverse(): SchemaBuildingStatement
     fun apply(to: VirtualSchema)
+    fun apply(to: Map<String, Table>)
 }
 
 data class VirtualTable(
@@ -94,6 +94,9 @@ var <T> Column<T>.dbDefaultValueHack: Expression<T>?
     set(value) { dbDefaultValueHackHelper2(this, value) }
 
 data class CreateSchema(val schema: Schema) : SchemaBuildingStatement {
+    override fun apply(to: Map<String, Table>) {
+        curren schema.createStatement()
+    }
     override val statements: List<String> get() = schema.createStatement()
     override fun reverse(): SchemaBuildingStatement = DropSchema(schema)
     override fun apply(to: VirtualSchema) {
@@ -102,7 +105,7 @@ data class CreateSchema(val schema: Schema) : SchemaBuildingStatement {
 }
 
 data class DropSchema(val schema: Schema) : SchemaBuildingStatement {
-    override val statements: List<String> get() = schema.dropStatement()
+    override val statements: List<String> get() = schema.dropStatement(false)
     override fun reverse(): SchemaBuildingStatement = CreateSchema(schema)
     override fun apply(to: VirtualSchema) {
         to.schemas.remove(schema.identifier)
@@ -125,60 +128,70 @@ data class DropTable(val table: VirtualTable) : SchemaBuildingStatement {
     }
 }
 
-data class CreateIndex(val table: VirtualTable, val index: VirtualIndex) : SchemaBuildingStatement {
-    override val statements: List<String> get() = index.toIndex(table).createStatement()
-    override fun reverse(): SchemaBuildingStatement = DropIndex(table, index)
+data class CreateIndex(val tableName: String, val index: VirtualIndex) : SchemaBuildingStatement {
+    override val statements: List<String> get() = index.toIndex(transac).createStatement()
+    override fun reverse(): SchemaBuildingStatement = DropIndex(tableName, index)
     override fun apply(to: VirtualSchema) {
-        to.tables[table.name]!!.indices += index
+        to.tables[tableName]!!.indices += index
     }
 }
 
-data class DropIndex(val table: VirtualTable, val index: VirtualIndex) : SchemaBuildingStatement {
+data class DropIndex(val tableName: String, val index: VirtualIndex) : SchemaBuildingStatement {
     override val statements: List<String> get() = index.toIndex(table).dropStatement()
-    override fun reverse(): SchemaBuildingStatement = CreateIndex(table, index)
+    override fun reverse(): SchemaBuildingStatement = CreateIndex(tableName, index)
     override fun apply(to: VirtualSchema) {
-        to.tables[table.name]!!.indices -= index
+        to.tables[tableName]!!.indices -= index
     }
 }
 
-data class AddColumn(val column: VirtualColumn) : SchemaBuildingStatement {
-    override val statements: List<String> get() = column.createStatement()
-    override fun reverse(): SchemaBuildingStatement = DropColumn(column)
+data class AddColumn(val tableName: String, val column: VirtualColumn) : SchemaBuildingStatement {
+    override val statements: List<String> get() = column.toColumn(table).createStatement()
+    override fun reverse(): SchemaBuildingStatement = DropColumn(tableName, column)
     override fun apply(to: VirtualSchema) {
-        to.tables[column.table.tableName]!!.registerColumn<Any?>(column.name, column.columnType)
-        if(colu)
+        to.tables[tableName]!!.columns += column
     }
 }
 
-data class DropColumn(val column: VirtualColumn) : SchemaBuildingStatement {
-    override val statements: List<String> get() = column.dropStatement()
-    override fun reverse(): SchemaBuildingStatement = AddColumn(column)
+data class DropColumn(val tableName: String, val column: VirtualColumn) : SchemaBuildingStatement {
+    override val statements: List<String> get() = column.toColumn(table).dropStatement()
+    override fun reverse(): SchemaBuildingStatement = AddColumn(tableName, column)
+    override fun apply(to: VirtualSchema) {
+        to.tables[tableName]!!.columns -= column
+    }
 }
 
-data class ModifyColumn(val from: VirtualColumn, val to: VirtualColumn) : SchemaBuildingStatement {
+data class ModifyColumn(val tableName: String, val from: VirtualColumn, val to: VirtualColumn) : SchemaBuildingStatement {
     override val statements: List<String>
-        get() = to.modifyStatements(
-            nullabilityChanged = from.columnType.nullable != to.columnType.nullable,
-            autoIncrementChanged = from.columnType.isAutoInc != to.columnType.isAutoInc,
-            defaultChanged = from.dbDefaultValueHack.toString() != to.dbDefaultValueHack.toString()
+        get() = to.toColumn(table).modifyStatements(
+            nullabilityChanged = from.type.nullable != to.type.nullable,
+            autoIncrementChanged = from.type.isAutoInc != to.type.isAutoInc,
+            defaultChanged = from.sqlDefault.toString() != to.sqlDefault.toString()
         )
 
-    override fun reverse(): SchemaBuildingStatement = ModifyColumn(to, from)
+    override fun reverse(): SchemaBuildingStatement = ModifyColumn(tableName, to, from)
+
+    override fun apply(to: VirtualSchema) {
+        val t = to.tables[tableName]!!
+        t.columns = t.columns.toMutableList().apply {
+            removeAll { it.name == this@ModifyColumn.to.name }
+            add(this@ModifyColumn.to)
+        }
+    }
 
     companion object {
-        fun needed(from: Column<*>, to: Column<*>): Boolean {
-            return from.columnType.nullable != to.columnType.nullable ||
-                    from.columnType.isAutoInc != to.columnType.isAutoInc ||
-                    from.dbDefaultValueHack.toString() != to.dbDefaultValueHack.toString()
+        fun needed(from: VirtualColumn, to: VirtualColumn): Boolean {
+            return from.type.nullable != to.type.nullable ||
+                    from.type.isAutoInc != to.type.isAutoInc ||
+                    from.sqlDefault.toString() != to.sqlDefault.toString()
         }
     }
 }
 
-fun Collection<Table>.migrateTo(newTables: Collection<Table>, out: MutableList<SchemaBuildingStatement>) {
+fun Collection<VirtualTable>.migrateTo(newTables: Collection<VirtualTable>, out: MutableList<SchemaBuildingStatement>) {
     diff(
         old = this,
         new = newTables,
-        compare = { a, b -> a.tableName == b.tableName },
+        compare = { a, b -> a.name == b.name },
         add = {
             out.add(CreateTable(it))
         },
@@ -191,34 +204,34 @@ fun Collection<Table>.migrateTo(newTables: Collection<Table>, out: MutableList<S
     )
 }
 
-fun Table.migrateTo(newTable: Table, out: MutableList<SchemaBuildingStatement>) {
-    assert(this.tableName == newTable.tableName)
+fun VirtualTable.migrateTo(newTable: VirtualTable, out: MutableList<SchemaBuildingStatement>) {
+    assert(this.name == newTable.name)
     diff(
         old = this.columns,
         new = newTable.columns,
         compare = { a, b -> a.name == b.name },
         add = {
-            out.add(AddColumn(it))
+            out.add(AddColumn(this, it))
         },
         same = { old, new ->
             if (ModifyColumn.needed(old, new)) {
-                out.add(ModifyColumn(old, new))
+                out.add(ModifyColumn(this, old, new))
             }
         },
         remove = {
-            out.add(DropColumn(it))
+            out.add(DropColumn(this, it))
         }
     )
     diff(
         old = this.indices,
         new = newTable.indices,
-        compare = { a, b -> a.indexName == b.indexName },
+        compare = { a, b -> a.name == b.name },
         add = {
-            out.add(CreateIndex(it))
+            out.add(CreateIndex(this, it))
         },
         same = { old, new -> },
         remove = {
-            out.add(DropIndex(it))
+            out.add(DropIndex(this, it))
         }
     )
 }
