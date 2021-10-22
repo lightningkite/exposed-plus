@@ -65,7 +65,7 @@ data class Column(
         }
         out.append(">")
     }
-    fun writeBaseColumnDeclaration(out: TabAppendable, name: String = this.name) {
+    fun writeBaseColumnDeclaration(out: TabAppendable, name: String = this.name, additionalWrite: ()->Unit = {}) {
         when(type) {
             ColumnType.TypeByte -> out.append("byte(\"$name\")")
             ColumnType.TypeUbyte -> out.append("ubyte(\"$name\")")
@@ -86,6 +86,7 @@ data class Column(
             ColumnType.TypeBool -> out.append("bool(\"$name\")")
             is ColumnType.TypeEnum -> out.append("enumeration(\"$name\", ${type.enumClass.qualifiedName!!.asString()}::class)")
         }
+        additionalWrite()
         if(nullable) out.append(".nullable()")
     }
     fun writeValueType(out: TabAppendable) {
@@ -94,8 +95,8 @@ data class Column(
             out.append("?")
         }
     }
-    fun writeColumnDeclaration(out: TabAppendable) {
-        writeBaseColumnDeclaration(out)
+    fun writeColumnDeclaration(out: TabAppendable, additionalWrite: ()->Unit = {}) {
+        writeBaseColumnDeclaration(out, additionalWrite = additionalWrite)
         if(annotations.byName("AutoIncrement") != null) out.append(".autoIncrement()")
         annotations.byName("Index")?.let {
             val name = it.arguments.values.firstOrNull()?.toString()

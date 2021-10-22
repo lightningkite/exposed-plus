@@ -1,5 +1,7 @@
 package com.lightningkite.exposedplus
 
+import com.google.devtools.ksp.symbol.KSClassDeclaration
+
 private fun TabAppendable.access(parts: List<String>) = parts.forEach { append(it); append('.') }
 
 sealed interface ResolvedField {
@@ -13,7 +15,7 @@ sealed interface ResolvedField {
         out.append("override ")
         writePropertyDeclaration(out)
         out.append(" = ")
-        writeMainValue(out, sourceNames)
+        writeMainValue(out, sourceNames, fieldAddition = {})
         out.appendLine()
     }
 
@@ -25,7 +27,7 @@ sealed interface ResolvedField {
         out.appendLine()
     }
 
-    fun writeMainValue(out: TabAppendable, sourceNames: List<String>)
+    fun writeMainValue(out: TabAppendable, sourceNames: List<String>,  fieldAddition: (Column)->Unit)
     fun writeAliasValue(out: TabAppendable, sourceNames: List<String>)
     fun writeInstanceConstructionPart(out: TabAppendable, sourceNames: List<String>) {
         out.append(name)
@@ -58,8 +60,8 @@ sealed interface ResolvedField {
             column.writeColumnType(out)
         }
 
-        override fun writeMainValue(out: TabAppendable, sourceNames: List<String>) {
-            column.writeColumnDeclaration(out)
+        override fun writeMainValue(out: TabAppendable, sourceNames: List<String>,  fieldAddition: (Column)->Unit) {
+            column.writeColumnDeclaration(out, {fieldAddition(column)})
         }
 
         override fun writeAliasValue(out: TabAppendable, sourceNames: List<String>) {
@@ -132,7 +134,7 @@ sealed interface ResolvedField {
             if(nullable) out.append("Nullable")
         }
 
-        override fun writeMainValue(out: TabAppendable, sourceNames: List<String>) {
+        override fun writeMainValue(out: TabAppendable, sourceNames: List<String>, fieldAddition: (Column)->Unit) {
             if(nullable) out.append("/*nullable*/ ")
             out.append(otherTable.simpleName)
             out.append("FKField")
@@ -141,7 +143,25 @@ sealed interface ResolvedField {
             out.tab {
                 val plusMe = sourceNames + name
                 for (sub in childFields) {
-                    sub.writeMainValue(out, plusMe)
+                    sub.writeMainValue(out, plusMe) { column ->
+                        out.append(".references(")
+                        out.append(otherTable.simpleName)
+                        out.append("Table.")
+                        otherTable.resolvedPrimaryKeys
+                            .find { it.name == sub.name }!!
+                            .writeColumnAccess(out, column)
+                        (this.annotations.byName("OnDelete")?.arguments?.values?.first() as? KSClassDeclaration)?.simpleName?.asString()?.let {
+                            out.append(", onDelete = ReferenceOption.$it")
+                        } ?: run {
+                            out.append(", onDelete = null")
+                        }
+                        (this.annotations.byName("OnUpdate")?.arguments?.values?.first() as? KSClassDeclaration)?.simpleName?.asString()?.let {
+                            out.append(", onUpdate = ReferenceOption.$it")
+                        } ?: run {
+                            out.append(", onUpdate = null")
+                        }
+                        out.append(")")
+                    }
                     out.appendLine(",")
                 }
             }
@@ -303,13 +323,13 @@ sealed interface ResolvedField {
             out.append("SubTable")
         }
 
-        override fun writeMainValue(out: TabAppendable, sourceNames: List<String>) {
+        override fun writeMainValue(out: TabAppendable, sourceNames: List<String>,  fieldAddition: (Column)->Unit) {
             out.append(subTable.simpleName)
             out.appendLine("SubTable(")
             out.tab {
                 val plusMe = sourceNames + name
                 for (sub in childFields) {
-                    sub.writeMainValue(out, plusMe)
+                    sub.writeMainValue(out, plusMe, fieldAddition)
                     out.appendLine(",")
                 }
             }

@@ -88,6 +88,7 @@ data class Table(
         out.appendLine("import com.lightningkite.exposedplus.*")
         out.appendLine("import org.jetbrains.exposed.sql.*")
         out.appendLine("import org.jetbrains.exposed.sql.transactions.transaction")
+        out.appendLine("import org.jetbrains.exposed.sql.ReferenceOption")
         out.appendLine("")
         out.appendLine("interface ${simpleName}Columns : BaseColumnsType<${simpleName}, ${keyType}> {")
         out.tab {
