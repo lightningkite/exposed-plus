@@ -2,10 +2,19 @@ package com.lightningkite.exposedplus
 
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.Index
+import org.jetbrains.exposed.sql.ReferenceOption
 
-class VirtualSchema {
+class VirtualSchema() {
     val schemas = HashSet<String>()
     val tables = HashMap<String, VirtualTable>()
+
+    constructor(tables: List<Table>):this() {
+        for(table in tables) {
+            this.tables[table.tableName] = VirtualTable(table)
+            table.tableName.substringBefore('.', "").takeUnless { it.isBlank() }?.let { this.schemas.add(it) }
+        }
+    }
+    constructor(vararg tables: Table):this(tables.toList())
 }
 
 sealed interface SchemaBuildingStatement {
@@ -20,26 +29,32 @@ data class VirtualTable(
     var primaryKeys: List<VirtualColumn>,
     var indices: List<VirtualIndex>
 ) {
-    constructor(table: Table): this(
+    constructor(table: Table) : this(
         name = table.tableName,
         columns = table.columns.map { VirtualColumn(it) },
         primaryKeys = table.primaryKey!!.columns.map { VirtualColumn(it) },
         indices = table.indices.map { VirtualIndex(it) }
     )
+
     val table: Table by lazy {
-        object: Table() {
+        object : Table() {
             init {
-                for(col in this@VirtualTable.columns) {
+                for (col in this@VirtualTable.columns) {
                     val c = registerColumn<Any?>(
                         name = col.name,
                         type = col.type
                     )
-                    if(col.sqlDefault != null) {
+                    col.sqlDefault?.let {
                         @Suppress("UNCHECKED_CAST")
-                        c.dbDefaultValueHack = col.sqlDefault as Expression<Any?>?
+                        c.defaultExpression(it as Expression<Any?>)
+                    }
+                    col.foreignKey?.let {
+                        c.foreignKey = ForeignKeyConstraint(
+                            target =
+                        )
                     }
                 }
-                for(i in this@VirtualTable.indices) {
+                for (i in this@VirtualTable.indices) {
                     index(
                         customIndexName = i.name,
                         isUnique = i.unique,
@@ -56,15 +71,35 @@ data class VirtualTable(
     }
 }
 
+data class VirtualForeignKeyConstraint(
+    val targetTable: VirtualTable,
+    val target: VirtualColumn,
+    val from: VirtualColumn,
+    val onUpdate: ReferenceOption?,
+    val onDelete: ReferenceOption?,
+    val name: String?
+) {
+    constructor(constraint: ForeignKeyConstraint):this(
+        targetTable = VirtualTable(constraint.target.table),
+        target = VirtualColumn(constraint.target),
+        from = VirtualColumn(constraint.from),
+        onUpdate = constraint.updateRule,
+        onDelete = constraint.deleteRule,
+        name = constraint.customFkName,
+    )
+}
+
 data class VirtualColumn(
     var name: String,
     var type: IColumnType,
+    var foreignKey: VirtualForeignKeyConstraint? = null,
     var sqlDefault: Expression<*>? = null
 ) {
-    constructor(column: Column<*>):this (
+    constructor(column: Column<*>) : this(
         name = column.name,
         type = column.columnType,
-        sqlDefault = column.dbDefaultValueHack,
+        foreignKey = column.foreignKey?.let { VirtualForeignKeyConstraint(it) },
+        sqlDefault = null /*TODO*/,
     )
 
     fun toColumn(table: VirtualTable): Column<*> = table.table.columns.find { it.name == name }!!
@@ -76,7 +111,7 @@ data class VirtualIndex(
     var unique: Boolean = false,
     var indexType: String? = null
 ) {
-    constructor(index: Index): this(
+    constructor(index: Index) : this(
         name = index.indexName,
         on = index.columns.map { VirtualColumn(it) },
         unique = index.unique,
@@ -85,13 +120,6 @@ data class VirtualIndex(
 
     fun toIndex(table: VirtualTable): Index = table.table.indices.find { it.indexName == name }!!
 }
-
-val dbDefaultValueHackHelper by lazy { Column::class.java.getMethod("getDbDefaultValue") }
-val dbDefaultValueHackHelper2 by lazy { Column::class.java.getMethod("setDbDefaultValue", Expression::class.java) }
-@Suppress("UNCHECKED_CAST")
-var <T> Column<T>.dbDefaultValueHack: Expression<T>?
-    get() = dbDefaultValueHackHelper(this) as Expression<T>?
-    set(value) { dbDefaultValueHackHelper2(this, value) }
 
 data class CreateSchema(val schema: Schema) : SchemaBuildingStatement {
     override val statements: List<String> get() = schema.createStatement()
@@ -102,7 +130,7 @@ data class CreateSchema(val schema: Schema) : SchemaBuildingStatement {
 }
 
 data class DropSchema(val schema: Schema) : SchemaBuildingStatement {
-    override val statements: List<String> get() = schema.dropStatement()
+    override val statements: List<String> get() = schema.dropStatement(false)
     override fun reverse(): SchemaBuildingStatement = CreateSchema(schema)
     override fun apply(to: VirtualSchema) {
         to.schemas.remove(schema.identifier)
@@ -141,44 +169,52 @@ data class DropIndex(val table: VirtualTable, val index: VirtualIndex) : SchemaB
     }
 }
 
-data class AddColumn(val column: VirtualColumn) : SchemaBuildingStatement {
-    override val statements: List<String> get() = column.createStatement()
-    override fun reverse(): SchemaBuildingStatement = DropColumn(column)
+data class AddColumn(val table: VirtualTable, val column: VirtualColumn) : SchemaBuildingStatement {
+    override val statements: List<String> get() = column.toColumn(table).createStatement()
+    override fun reverse(): SchemaBuildingStatement = DropColumn(table, column)
     override fun apply(to: VirtualSchema) {
-        to.tables[column.table.tableName]!!.registerColumn<Any?>(column.name, column.columnType)
-        if(colu)
+        to.tables[table.name] = to.tables[table.name]!!.let { it.copy(columns = it.columns + column) }
     }
 }
 
-data class DropColumn(val column: VirtualColumn) : SchemaBuildingStatement {
-    override val statements: List<String> get() = column.dropStatement()
-    override fun reverse(): SchemaBuildingStatement = AddColumn(column)
+data class DropColumn(val table: VirtualTable, val column: VirtualColumn) : SchemaBuildingStatement {
+    override val statements: List<String> get() = column.toColumn(table).dropStatement()
+    override fun reverse(): SchemaBuildingStatement = AddColumn(table, column)
+    override fun apply(to: VirtualSchema) {
+        to.tables[table.name] =
+            to.tables[table.name]!!.let { it.copy(columns = it.columns.filter { it.name != column.name }) }
+    }
 }
 
-data class ModifyColumn(val from: VirtualColumn, val to: VirtualColumn) : SchemaBuildingStatement {
+data class ModifyColumn(val table: VirtualTable, val from: VirtualColumn, val to: VirtualColumn) :
+    SchemaBuildingStatement {
     override val statements: List<String>
-        get() = to.modifyStatements(
-            nullabilityChanged = from.columnType.nullable != to.columnType.nullable,
-            autoIncrementChanged = from.columnType.isAutoInc != to.columnType.isAutoInc,
-            defaultChanged = from.dbDefaultValueHack.toString() != to.dbDefaultValueHack.toString()
+        get() = to.toColumn(table).modifyStatements(
+            nullabilityChanged = from.type.nullable != to.type.nullable,
+            autoIncrementChanged = from.type.isAutoInc != to.type.isAutoInc,
+            defaultChanged = from.sqlDefault.toString() != to.sqlDefault.toString()
         )
 
-    override fun reverse(): SchemaBuildingStatement = ModifyColumn(to, from)
+    override fun reverse(): SchemaBuildingStatement = ModifyColumn(table, to, from)
+    override fun apply(to: VirtualSchema) {
+        to.tables[table.name] =
+            to.tables[table.name]!!.let { it.copy(columns = it.columns.filter { it.name != from.name }.plus(this.to)) }
+    }
 
     companion object {
-        fun needed(from: Column<*>, to: Column<*>): Boolean {
-            return from.columnType.nullable != to.columnType.nullable ||
-                    from.columnType.isAutoInc != to.columnType.isAutoInc ||
-                    from.dbDefaultValueHack.toString() != to.dbDefaultValueHack.toString()
+        fun needed(from: VirtualColumn, to: VirtualColumn): Boolean {
+            return from.type.nullable != to.type.nullable ||
+                    from.type.isAutoInc != to.type.isAutoInc ||
+                    from.sqlDefault.toString() != to.sqlDefault.toString()
         }
     }
 }
 
-fun Collection<Table>.migrateTo(newTables: Collection<Table>, out: MutableList<SchemaBuildingStatement>) {
+fun VirtualSchema.migrateTo(newTables: VirtualSchema, out: MutableList<SchemaBuildingStatement>) {
     diff(
-        old = this,
-        new = newTables,
-        compare = { a, b -> a.tableName == b.tableName },
+        old = this.tables.values,
+        new = newTables.tables.values,
+        compare = { a, b -> a.name == b.name },
         add = {
             out.add(CreateTable(it))
         },
@@ -191,34 +227,34 @@ fun Collection<Table>.migrateTo(newTables: Collection<Table>, out: MutableList<S
     )
 }
 
-fun Table.migrateTo(newTable: Table, out: MutableList<SchemaBuildingStatement>) {
-    assert(this.tableName == newTable.tableName)
+fun VirtualTable.migrateTo(newTable: VirtualTable, out: MutableList<SchemaBuildingStatement>) {
+    assert(this.name == newTable.name)
     diff(
         old = this.columns,
         new = newTable.columns,
         compare = { a, b -> a.name == b.name },
         add = {
-            out.add(AddColumn(it))
+            out.add(AddColumn(this, it))
         },
         same = { old, new ->
             if (ModifyColumn.needed(old, new)) {
-                out.add(ModifyColumn(old, new))
+                out.add(ModifyColumn(this, old, new))
             }
         },
         remove = {
-            out.add(DropColumn(it))
+            out.add(DropColumn(this, it))
         }
     )
     diff(
         old = this.indices,
         new = newTable.indices,
-        compare = { a, b -> a.indexName == b.indexName },
+        compare = { a, b -> a.name == b.name },
         add = {
-            out.add(CreateIndex(it))
+            out.add(CreateIndex(this, it))
         },
         same = { old, new -> },
         remove = {
-            out.add(DropIndex(it))
+            out.add(DropIndex(this, it))
         }
     )
 }
